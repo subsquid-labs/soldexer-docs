@@ -60,11 +60,15 @@ Real life protocols and infra introduce a couple of complications that you need 
 
    To be able to detect and correctly process orphan blocks the client must
 
+
    **A.** Maintain a backlog of hash values for recent blocks (available at the `.header.hash` field; enable it by setting the `.fields.block.hash` field of the request to `true`). Backlog depth of ten blocks should suffice on Solana.
+
 
    **B.** Be ready to restart its business logic at any block in the backlog. This may involve state rollbacks.
 
+
    **C.** Supply the `parentBlockHash` request field when resuming the stream after termination.
+
 
    **D.** Expect HTTP 409 (Conflict) responses from the API. These occur when the server detects that the first block of the request does not exist in the current consensus / is an orphan. The response contains a list of blocks preceeding the one that was requested:
    ```json
@@ -87,7 +91,12 @@ Real life protocols and infra introduce a couple of complications that you need 
    ```
    The client must use this response and its block hash backlog to find the latest consensus block it received. If no such block is found it can send another POST request with the earliest block from the current response and a wrong hash (e.g. the one from the backlog): an HTTP 409 response from the API will contain even earlier blocks that might match those found in the backlog. This process can be repeated until the backlog is exhausted.
 
+
    Once the client finds a non-orphaned block it should restart the business logic and resume the stream at its height.
+
+
+
+ 
 
    </Expandable>
 
