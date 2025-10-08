@@ -87,7 +87,7 @@ Real life protocols and infra introduce a couple of complications that you need 
    ```
    The client must use this response and its block hash backlog to find the latest consensus block it received. If no such block is found it can send another POST request with the earliest block from the current response and a wrong hash (e.g. the one from the backlog): an HTTP 409 response from the API will contain even earlier blocks that might match those found in the backlog. This process can be repeated until the backlog is exhausted. <br />
 
-   Once the client finds a non-orphaned block it should restart the business logic and resume the stream at its height.
+   Once the client finds a non-orphaned block it should restart the business logic and resume the stream at its height. <br /><br />
 
    </Expandable>
 
