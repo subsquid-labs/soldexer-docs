@@ -1,0 +1,143 @@
+---
+title: "External APIs and IPFS"
+description: "Enrich blockchain data with external APIs and IPFS content in your squids"
+---
+
+# External APIs and IPFS
+
+Squid processors are standard Node.js processes, enabling you to fetch data from external APIs or IPFS gateways within the `processor.run()` method. This allows you to enrich blockchain data with off-chain information.
+
+<Info>
+  For squids deployed to [SQD Cloud](cloud), use API calls in combination with
+  API keys set via [secrets](/en/cloud/resources/env-variables) for secure access.
+</Info>
+
+## External API Integration
+
+### Price Data Example
+
+You can enrich indexed transactions with historical price data using external APIs like CoinGecko:
+
+```typescript main.ts
+import axios from "axios";
+import moment from "moment";
+
+processor.run(new TypeormDatabase(), async (ctx) => {
+  const burns: Burn[] = [];
+
+  for (let block of ctx.blocks) {
+    for (let txn of block.transactions) {
+      burns.push(
+        new Burn({
+          id: formatID(block.header.height, txn.hash),
+          block: block.header.height,
+          address: txn.from,
+          value: txn.value,
+          txHash: txn.hash,
+          price: await getETHPriceByDate(block.header.timestamp),
+        })
+      );
+    }
+  }
+
+  await ctx.store.save(burns);
+});
+
+async function getETHPriceByDate(timestamp: number): Promise<bigint> {
+  const formatted = moment(new Date(timestamp).toISOString()).format(
+    "DD-MM-YYYY"
+  );
+  const res = await axios.get(
+    `https://api.coingecko.com/api/v3/coins/ethereum/history?date=${formatted}&localization=false`
+  );
+  return res.data.market_data.current_price.usd;
+}
+```
+
+<Tip>
+  Use caching mechanisms to avoid hitting rate limits and improve performance
+  when fetching external data.
+</Tip>
+
+## IPFS Integration
+
+For reliable indexing of content stored on IPFS (e.g., NFT metadata), we recommend using dedicated IPFS gateways like those provided by [Filebase](https://filebase.com/dedicated-gateways/).
+
+<Warning>
+  Public IPFS gateways may have rate limits and reliability issues. Use
+  dedicated gateways for production squids.
+</Warning>
+
+### IPFS Fetching Example
+
+```typescript ipfs.ts
+import Axios from "axios";
+import https from "https";
+
+// Use a dedicated gateway for production
+export const BASE_URL = "https://your-dedicated-gateway.ipfs.io/ipfs/";
+
+export const api = Axios.create({
+  baseURL: BASE_URL,
+  headers: {
+    "Content-Type": "application/json",
+  },
+  withCredentials: false,
+  timeout: 5000,
+  httpsAgent: new https.Agent({ keepAlive: true }),
+});
+
+export const fetchMetadata = async (
+  ctx: DataHandlerContext<Store>,
+  cid: string
+): Promise<any | null> => {
+  try {
+    const { status, data } = await api.get(`${BASE_URL}/${cid}`);
+    ctx.log.info(`[IPFS] ${status} CID: ${cid}`);
+
+    if (status < 400) {
+      return data;
+    }
+  } catch (e) {
+    ctx.log.warn(`[IPFS] ERROR CID: ${cid} - ${(e as Error).message}`);
+  }
+  return null;
+};
+```
+
+### Using IPFS in Processor
+
+```typescript main.ts
+processor.run(new TypeormDatabase(), async (ctx) => {
+  for (let block of ctx.blocks) {
+    for (let log of block.logs) {
+      // Decode NFT event to get CID
+      const { tokenId, tokenURI } = decodeNFTEvent(log);
+
+      // Extract CID from tokenURI
+      const cid = extractCID(tokenURI);
+
+      // Fetch metadata from IPFS
+      const metadata = await fetchMetadata(ctx, cid);
+
+      if (metadata) {
+        // Store NFT with metadata
+        await ctx.store.save(
+          new NFT({
+            id: tokenId,
+            uri: tokenURI,
+            name: metadata.name,
+            image: metadata.image,
+            attributes: metadata.attributes,
+          })
+        );
+      }
+    }
+  }
+});
+```
+
+<Info>
+  For a detailed example with IPFS gateway and external API calls, see [Step 3
+  of the BAYC tutorial](sdk/tutorials/bayc/step-three-adding-external-data).
+</Info>

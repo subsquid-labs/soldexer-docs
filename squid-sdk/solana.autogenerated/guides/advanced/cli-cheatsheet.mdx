@@ -1,0 +1,146 @@
+---
+title: "CLI Cheatsheet"
+description: "Quick reference for commonly used Squid CLI commands"
+---
+
+# Squid CLI Cheatsheet
+
+The [`sqd` CLI tool](/en/sdk/squid-sdk/tools/cli) has [built-in aliasing](/en/sdk/squid-sdk/tools/cli) that picks up custom commands defined in `commands.json` in the project root.
+
+All [squid templates](/en/sdk/squid-sdk/evm/getting-started/squid-development#templates) include a pre-populated `commands.json` file with handy scripts for common development tasks.
+
+## Getting Help
+
+View all available commands (including custom commands from `commands.json`):
+
+```bash
+sqd --help
+```
+
+<Tip>
+  Custom commands defined in `commands.json` will appear in the `SQUID COMMANDS`
+  help section.
+</Tip>
+
+## Initial Setup
+
+Before using the `sqd` CLI tool, install all project dependencies:
+
+```bash
+npm i
+```
+
+## Building the Squid
+
+Build your squid project:
+
+```bash
+sqd build
+```
+
+Delete all build artifacts:
+
+```bash
+sqd clean
+```
+
+## Running the Squid
+
+<Note>
+  The `sqd up` and `sqd down` commands assume that the `docker compose` command
+  is supported and the Docker daemon is running. Modify the definitions in
+  `commands.json` if `docker-compose` should be used instead.
+</Note>
+
+Start a local PostgreSQL database:
+
+```bash
+sqd up
+```
+
+Stop and remove the local PostgreSQL database:
+
+```bash
+sqd down
+```
+
+Run all services defined in `squid.yaml` locally:
+
+```bash
+sqd run [PATH]
+```
+
+Start the GraphQL server (development mode):
+
+```bash
+sqd serve
+```
+
+Start the GraphQL API server with caching and limits (production mode):
+
+```bash
+sqd serve:prod
+```
+
+## Database Migrations
+
+For detailed information, see [TypeORM Migration generation](/en/sdk/squid-sdk/tools/migrations-gen).
+
+Apply pending migrations:
+
+```bash
+sqd migration:apply
+```
+
+Generate a migration for the schema defined in `schema.graphql`:
+
+```bash
+sqd migration:generate
+```
+
+Clean the `db/migrations` folder:
+
+```bash
+sqd migration:clean
+```
+
+## Code Generation
+
+For more details, see [TypeORM Model generation](/en/sdk/squid-sdk/tools/model-gen) and [Type-safe decoding](/en/sdk/squid-sdk/tools/typegen).
+
+Generate TypeORM entities from `schema.graphql`:
+
+```bash
+sqd codegen
+```
+
+Generate data access classes for ABI files in the `./abi` folder:
+
+```bash
+sqd typegen
+```
+
+<Info>
+  Depending on the template, `sqd typegen` is aliased to a different typegen
+  tool specific to the chain type. Run `sqd typegen --help` for details.
+</Info>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Development Flow"
+    icon="diagram-project"
+    href="/en/sdk/squid-sdk/evm/getting-started/squid-development"
+  >
+    Learn the general development workflow
+  </Card>
+
+  <Card
+    title="Full CLI Reference"
+    icon="book"
+    href="/en/sdk/squid-sdk/tools/cli"
+  >
+    Complete CLI documentation
+  </Card>
+</CardGroup>

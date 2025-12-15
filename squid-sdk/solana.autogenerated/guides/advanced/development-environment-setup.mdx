@@ -1,0 +1,139 @@
+---
+title: "Development Environment Setup"
+description: "Prepare your development environment for working with Squid SDK"
+---
+
+# Development Environment Setup
+
+This guide will help you set up all the necessary tools for developing with Squid SDK.
+
+## Prerequisites
+
+You'll need to install the following tools to start building blockchain indexers with Squid SDK.
+
+## Node.js
+
+Node.js is required to run Squid SDK. Install Node.js v16 or newer:
+
+<Tabs>
+<Tab title="Linux">
+
+Use your distribution's package manager or the [official binaries](https://nodejs.org/en/download).
+
+</Tab>
+<Tab title="Mac">
+
+Use the [official binaries](https://nodejs.org/en/download) or [Homebrew](https://nodejs.org/en/download/package-manager/#alternatives-2).
+
+</Tab>
+<Tab title="Windows">
+
+Use WSL2 and follow [this guide](https://docs.microsoft.com/en-us/windows/dev-environment/javascript/nodejs-on-wsl), or use the [official installer](https://nodejs.org/en/download).
+
+</Tab>
+</Tabs>
+
+<Check>
+  Verify your Node.js installation by running `node --version`. You should see
+  v16.0.0 or higher.
+</Check>
+
+```bash
+node --version
+```
+
+## Squid CLI
+
+Squid CLI is a command-line tool for scaffolding, managing, and deploying squids. Install it globally:
+
+```bash
+npm i -g @subsquid/cli
+```
+
+<Check>Verify the installation by running `sqd --version`.</Check>
+
+For detailed installation instructions and troubleshooting, see the [CLI installation guide](/en/sdk/squid-sdk/tools/cli).
+
+## Git
+
+Squid CLI uses [Git](https://git-scm.com) to retrieve templates. Install Git for your platform:
+
+<Tabs>
+<Tab title="Linux">
+
+Use your distribution's package manager (e.g., `apt install git` or `yum install git`).
+
+</Tab>
+<Tab title="Mac">
+
+Use the [official installer](https://sourceforge.net/projects/git-osx-installer/) or install via [Homebrew](https://git-scm.com/download/mac):
+
+```bash
+brew install git
+```
+
+</Tab>
+<Tab title="Windows">
+
+Download and install [Git for Windows](https://git-scm.com/download/win).
+
+</Tab>
+</Tabs>
+
+<Check>Verify Git installation by running `git --version`.</Check>
+
+## Docker
+
+Most squids [use a database](/en/sdk/squid-sdk/features/persisting-data/typeorm) to store processed data. Docker makes it easy to run PostgreSQL locally for development.
+
+<Tabs>
+<Tab title="Linux">
+
+**Ubuntu**
+
+Follow the [official installation guide](https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository) for Ubuntu.
+
+**Other Linux distributions**
+
+Use your distribution's package manager or follow the [official Docker installation guide](https://docs.docker.com/engine/install/).
+
+</Tab>
+<Tab title="Mac">
+
+Install [Docker Desktop for Mac](https://docs.docker.com/desktop/mac/install/).
+
+</Tab>
+<Tab title="Windows">
+
+Install [Docker Desktop for Windows](https://docs.docker.com/desktop/windows/install/).
+
+<Tip>
+  For the best experience on Windows, use Docker Desktop with WSL2 integration.
+</Tip>
+
+</Tab>
+</Tabs>
+
+<Check>Verify Docker installation by running `docker --version`.</Check>
+
+## Next Steps
+
+With your environment set up, you're ready to start building:
+
+<CardGroup cols={2}>
+  <Card
+    title="Quickstart"
+    icon="rocket"
+    href="/en/sdk/squid-sdk/evm/quickstart"
+  >
+    Build your first indexer in 5 minutes
+  </Card>
+
+  <Card
+    title="Indexer from Scratch"
+    icon="code"
+    href="/en/sdk/squid-sdk/evm/getting-started/squid-from-scratch"
+  >
+    Learn how to compose SDK packages
+  </Card>
+</CardGroup>
