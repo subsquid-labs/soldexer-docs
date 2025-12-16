@@ -1,0 +1,201 @@
+---
+title: file-store-* packages
+description: File-based data stores for CSV, JSON, Parquet, and S3 destinations
+---
+
+# File Store Packages
+
+Squid SDK provides file-based implementations of the `Store` interface for saving indexed data to various file formats. These stores are designed primarily for offline analytics and support local filesystems and S3-compatible storage.
+
+## Supported Formats
+
+- **CSV** - `@subsquid/file-store-csv`
+- **JSON/JSONL** - `@subsquid/file-store-json`
+- **Parquet** - `@subsquid/file-store-parquet`
+
+## CSV Format Support
+
+### `Table` Implementation
+
+The `@subsquid/file-store-csv` package provides a `Table` implementation for writing to CSV files. Constructor accepts:
+
+* **`fileName: string`**: The name of the output file in every dataset partition folder
+* **`schema: {[column: string]: ColumnData}`**: A mapping from CSV column names to `ColumnData` objects
+* **`options?: TableOptions`**: Optional table configuration
+
+### CSV Columns
+
+`ColumnData` objects determine how data should be serialized. Create them with the `Column` factory function:
+
+```typescript
+Column(type, {nullable?: boolean})
+```
+
+Available column types:
+
+| Column type | Type of the data row field |
+|:-----------:|:--------------------------:|
+| `Types.String()` | `string` |
+| `Types.Numeric()` | `number` or `bigint` |
+| `Types.Boolean()` | `boolean` |
+| `Types.DateTime(format?: string)` | `Date` |
+| `Types.JSON<T>()` | `T` |
+
+`Types.DateTime` accepts an optional [strftime](https://pubs.opengroup.org/onlinepubs/009695399/functions/strftime.html)-compatible format string.
+
+### CSV Example
+
+```typescript
+import {Database, LocalDest} from '@subsquid/file-store'
+import {Column, Table, Types} from '@subsquid/file-store-csv'
+
+const dbOptions = {
+  tables: {
+    TransfersTable: new Table('transfers.csv', {
+      from: Column(Types.String()),
+      to: Column(Types.String()),
+      value: Column(Types.Numeric()),
+      timestamp: Column(Types.DateTime())
+    })
+  },
+  dest: new LocalDest('./data'),
+  chunkSizeMb: 10
+}
+```
+
+## JSON Format Support
+
+### `Table` Implementation
+
+The `@subsquid/file-store-json` package provides a `Table` implementation for writing to JSON and [JSONL](https://jsonlines.org) files.
+
+Constructor signature:
+```typescript
+Table<S extends Record<string, any>>(fileName: string, options?: {lines?: boolean})
+```
+
+* **`S`**: TypeScript type describing the table data schema
+* **`fileName: string`**: Name of the output file in every dataset partition folder
+* **`options?.lines`**: Whether to use JSONL instead of plain JSON array (default: false)
+
+### JSON Example
+
+```typescript
+import {Database} from '@subsquid/file-store'
+import {Table} from '@subsquid/file-store-json'
+
+const dbOptions = {
+  tables: {
+    TransfersTable: new Table<{
+      from: string
+      to: string
+      value: string
+    }>('transfers.jsonl', {lines: true})
+  },
+  dest: new LocalDest('./data'),
+  chunkSizeMb: 10
+}
+```
+
+## Parquet Format Support
+
+<Info>
+Support for the Parquet format is currently experimental. Contact us at the [SquidDevs Telegram channel](https://t.me/HydraDevs) for support.
+</Info>
+
+### `Table` Implementation
+
+[Apache Parquet](https://parquet.apache.org) is an advanced format for storing tabular data. It divides table columns into column chunks that are stored contiguously, allowing efficient partial reads. Column chunks can be compressed with row-specific algorithms for enhanced performance.
+
+The `@subsquid/file-store-parquet` package provides a `Table` implementation. Constructor accepts:
+
+* **`fileName: string`**: Name of the output file in every dataset partition folder
+* **`schema: {[column: string]: ColumnData}`**: Mapping from Parquet column names to `ColumnData` objects
+* **`options?: TableOptions`**: Optional table configuration
+
+### Parquet Columns
+
+`ColumnData` objects define storage options for each column. Create them with the `Column` factory function:
+
+Available column types:
+
+| Column type | Logical type | Primitive type | Valid data contents |
+|:-----------:|:------------:|:--------------:|:-------------------:|
+| `Types.String()` | variable length string | `BYTE_ARRAY` | `string` of any length |
+| `Types.Numeric()` | - | varies | `number` or `bigint` |
+| `Types.Boolean()` | - | `BOOLEAN` | `boolean` |
+| `Types.DateTime()` | timestamp | `INT64` | `Date` |
+| `Types.JSON<T>()` | JSON | `BYTE_ARRAY` | `T` |
+
+### Parquet Example
+
+```typescript
+import {Database, LocalDest} from '@subsquid/file-store'
+import {Column, Table, Types} from '@subsquid/file-store-parquet'
+
+const dbOptions = {
+  tables: {
+    TransfersTable: new Table('transfers.parquet', {
+      from: Column(Types.String()),
+      to: Column(Types.String()),
+      value: Column(Types.Numeric()),
+      blockNumber: Column(Types.Numeric())
+    })
+  },
+  dest: new LocalDest('./data'),
+  chunkSizeMb: 10
+}
+```
+
+## S3 Support
+
+All file store implementations support S3-compatible storage destinations using the `S3Dest` class from `@subsquid/file-store`.
+
+### S3 Configuration
+
+```typescript
+import {Database, S3Dest} from '@subsquid/file-store'
+import {Table} from '@subsquid/file-store-csv'
+
+const dbOptions = {
+  tables: { /* ... */ },
+  dest: new S3Dest(
+    's3://my-bucket/my-folder',
+    {
+      region: 'us-east-1',
+      credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+      }
+    }
+  ),
+  chunkSizeMb: 10
+}
+```
+
+### Supported S3-Compatible Services
+
+- AWS S3
+- Google Cloud Storage
+- MinIO
+- DigitalOcean Spaces
+- Other S3-compatible storage providers
+
+## Common Options
+
+### Database Options
+
+When creating a `Database` instance, you can configure:
+
+- **`tables`**: Object mapping table names to `Table` instances
+- **`dest`**: Destination for output files (`LocalDest` or `S3Dest`)
+- **`chunkSizeMb`**: Size threshold for creating new partitions (default: 10 MB)
+- **`hooks`**: Optional lifecycle hooks for custom behavior
+
+### Data Partitioning
+
+File-based stores partition datasets by block height automatically. A new partition is created when:
+- The internal buffer reaches `chunkSizeMb` size, or
+- `setForceFlush()` is called during batch processing
+
+Same failover guarantees as Postgres-based stores: processors roll back to the last successful state after restart.

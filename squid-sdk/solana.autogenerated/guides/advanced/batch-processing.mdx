@@ -1,0 +1,232 @@
+---
+title: "Batch Processing"
+description: "Optimize your indexer performance with batch-based data transformation"
+---
+
+# Batch Processing
+
+Batch processing is a core performance optimization technique in Squid SDK that dramatically improves indexing speed by minimizing database operations and maximizing data throughput.
+
+## Core Principles
+
+The batch processing model relies on these key principles:
+
+- **Minimize database hits** by grouping multiple single-row transactions into multi-row batch transactions
+- **Transform data in memory** using vectorized operators for maximum efficiency
+
+
+- **Batch Solana state queries** using efficient account data retrieval patterns
+
+
+
+
+<Tip>
+  Batch processing is more flexible than handler parallelization and provides
+  better performance for the inherently sequential nature of blockchain
+  indexing.
+</Tip>
+
+## How Batch Processing Works
+
+To illustrate batch processing, consider a processor that tracks the current state of on-chain records. It listens to `Create` and `Update` events and receives a batch of events:
+
+```typescript
+[
+  Create({ id: 1, name: "Alice" }),
+  Update({ id: 1, name: "Bob" }),
+  Create({ id: 2, name: "Mikee" }),
+  Update({ id: 1, name: "Carol" }),
+  Update({ id: 2, name: "Mike" }),
+];
+```
+
+Following batch processing principles, the processor updates entity states in memory and persists only the final state:
+
+```typescript
+[
+  { id: 1, name: "Carol" },
+  { id: 2, name: "Mike" },
+];
+```
+
+This results in a single database transaction instead of multiple individual updates.
+
+<Note>
+  The [data batch](sdk/reference/processors/architecture/#ctxblocks) contains
+  all events from multiple blocks, allowing for efficient batch processing.
+</Note>
+
+## Implementation Patterns
+
+Here's the idiomatic pattern for implementing batch processing with [`processor.run()`](sdk/reference/processors/architecture/#processorrun):
+
+
+```typescript
+processor.run(new TypeormDatabase(), async (ctx) => {
+  // Step 1: Collect and normalize all data from the batch
+  const instructionDataBatch = [];
+
+  for (const block of ctx.blocks) {
+    for (const instruction of block.instructions) {
+      // Transform and normalize raw instruction data
+      instructionDataBatch.push(decodeAndTransformToMyData(instruction));
+    }
+  }
+
+  // Step 2: Extract all entity IDs that need to be updated/created
+  const myEntityIds = new Set();
+  for (const d of instructionDataBatch) {
+    // Business logic mapping on-chain data to entity IDs
+    myEntityIds.add(extractEntityId(d));
+  }
+
+  // Step 3: Batch-load existing entities using IN operator
+  const myEntities: Map<string, MyEntity> = new Map(
+    (await ctx.store.findBy(MyEntity, { id: In([...myEntityIds]) })).map(
+      (entity) => [entity.id, entity]
+    )
+  );
+
+  // Step 4: Calculate updated state for all entities
+  for (const d of instructionDataBatch) {
+    const myEntity = myEntities.get(extractEntityId(d));
+    if (myEntity == null) {
+      // Create new entity instance
+      myEntities.set(extractEntityId(d), new MyEntity(d));
+    } else {
+      // Update existing entity
+      updateEntity(myEntity, d);
+    }
+  }
+
+  // Step 5: Batch-save all entities in a single transaction
+  await ctx.store.save([...myEntities.values()]);
+});
+```
+
+
+
+
+
+<Info>
+  For complete implementations of this pattern, see: 
+</Info>
+
+## Anti-patterns to Avoid
+
+<Warning>
+  Avoid loading or persisting single entities unless absolutely necessary. This
+  dramatically reduces indexing performance.
+</Warning>
+
+### ❌ Anti-pattern: Individual Entity Saves
+
+
+Here's an example of what **not** to do - individual saves per data item:
+
+```typescript
+// ❌ ANTI-PATTERN: Individual saves per data item
+processor.run(new TypeormDatabase(), async (ctx) => {
+  for (const block of ctx.blocks) {
+    for (const instruction of block.instructions) {
+      // Process instruction
+      const data = extractData(instruction);
+      
+      // ❌ This creates a database transaction for each instruction!
+      await ctx.store.save(new MyEntity(data));
+    }
+    
+    
+    
+    
+  }
+});
+```
+
+### ✅ Correct Pattern: Batch Processing
+
+Instead, use in-memory caching and batch operations:
+
+
+```typescript
+// ✅ CORRECT: Batch processing with in-memory cache
+processor.run(new TypeormDatabase(), async (ctx) => {
+  const entities: Map<string, MyEntity> = new Map();
+
+  for (const block of ctx.blocks) {
+    for (const instruction of block.instructions) {
+      const data = extractData(instruction);
+      // Store in memory for batch processing
+      entities.set(data.id, new MyEntity(data));
+    }
+    
+    
+    
+    
+  }
+
+  // Single database transaction for all entities
+  await ctx.store.save([...entities.values()]);
+});
+```
+
+## Migration from Handler-Based Processing
+
+Batch processing can serve as a drop-in replacement for handler-based mappings (like those used in subgraphs). While handler-based processing is significantly slower due to excessive database operations, it can be a useful intermediary step during [migration from subgraphs to Squid SDK](sdk/resources/migrate/migrate-subgraph/).
+
+### Transitional Approach
+
+You can reuse existing handlers while iterating over batch data:
+
+
+```typescript
+processor.run(new TypeormDatabase(), async (ctx) => {
+  for (const block of ctx.blocks) {
+    // Process instructions
+    for (const instruction of block.instructions) {
+      if (instruction.programId === PROGRAM_ID) {
+        await handleInstruction(ctx, instruction);
+      }
+    }
+    
+    
+    
+    
+  }
+});
+```
+
+<Tip>
+  This approach allows for gradual migration while maintaining existing logic.
+  However, for optimal performance, consider refactoring to true batch
+  processing patterns.
+</Tip>
+
+## Block Hooks
+
+You can implement pre- and post-block hooks for additional processing logic:
+
+```typescript
+processor.run(new TypeormDatabase(), async (ctx) => {
+  for (const block of ctx.blocks) {
+    await preBlockHook(ctx, block);
+
+    
+    for (const instruction of block.instructions) {
+      // Process instructions
+    }
+    
+    
+    
+    
+
+    await postBlockHook(ctx, block);
+  }
+});
+```
+
+<Note>
+  Block hooks are useful for implementing cross-block state management, caching,
+  or cleanup operations that need to run before or after processing each block.
+</Note>
+
