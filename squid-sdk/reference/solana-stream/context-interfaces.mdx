@@ -1,0 +1,40 @@
+---
+title: "Context Interfaces"
+description: "Block data for Solana"
+---
+
+# Block data for Solana
+
+In Solana Squid SDK, the data is processed by repeatedly calling the user-defined [batch handler](/en/sdk/squid-sdk/features/batch-processing) function on batches of on-chain data. The sole argument of the batch handler is its context `ctx`, and `ctx.blocks` is an array of `Block` objects containing the data to be processed, aligned at the block level.
+
+For `SolanaBatchProcessor` the `Block` interface is defined as follows:
+
+```typescript
+export interface Block<F extends FieldSelection = {}> {
+  header: BlockHeader<F>;
+  instructions: Instruction<F>[];
+  transactions: Transaction<F>[];
+  logs: LogMessage<F>[];
+  balances: Balance<F>[];
+  tokenBalances: TokenBalance<F>[];
+  rewards: Reward<F>[];
+}
+```
+
+`F` here is the type of the argument of the [`setFields()`](/en/sdk/squid-sdk/solana/sdk/solana-batch/field-selection) processor method.
+
+`BlockData.header` contains the block header data. The rest of the fields are iterables containing the six kinds of blockchain data. Canonical ordering within each iterable depends on the data kind:
+
+- `transactions` are ordered in the same way as they are within blocks;
+- `instructions` follow the order of transactions that gave rise to them;
+- `tokenBalances` are ordered in a deterministic but otherwise unspecified way.
+
+The exact fields available in each data item type are inferred from the `setFields()` call argument. They are documented on the [field selection](/en/sdk/squid-sdk/solana/sdk/solana-batch/field-selection) page:
+
+- [`Instruction` section](/en/sdk/squid-sdk/solana/sdk/solana-batch/field-selection#instruction);
+- [`Transaction` section](/en/sdk/squid-sdk/solana/sdk/solana-batch/field-selection#transaction);
+- [`LogMessage` section](/en/sdk/squid-sdk/solana/sdk/solana-batch/field-selection#logmessage);
+- [`Balance` section](/en/sdk/squid-sdk/solana/sdk/solana-batch/field-selection#balance);
+- [`TokenBalance` section](/en/sdk/squid-sdk/solana/sdk/solana-batch/field-selection#tokenbalance);
+- [`Reward` section](/en/sdk/squid-sdk/solana/sdk/solana-batch/field-selection#reward);
+- [`BlockHeader` section](/en/sdk/squid-sdk/solana/sdk/solana-batch/field-selection#block-header).

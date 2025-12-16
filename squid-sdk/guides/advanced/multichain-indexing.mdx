@@ -1,0 +1,149 @@
+---
+title: "Multichain Indexing"
+description: "Index and combine data from multiple blockchains into a unified API"
+---
+
+# Multichain Indexing
+
+Squids can extract data from multiple blockchains into a shared data sink. When data is [stored to PostgreSQL](sdk/resources/persisting-data/typeorm), it can be served as a unified multichain [GraphQL API](sdk/resources/serving-graphql).
+
+<Tip>
+  Multichain indexing enables powerful cross-chain analytics and unified data
+  access across different blockchain networks.
+</Tip>
+
+## Setup
+
+To index multiple chains, run one [processor](sdk/overview) per source network:
+
+### 1. Create separate entry points
+
+Make a separate entry point (`main.ts` or equivalent) for each processor:
+
+```bash
+├── src
+│   ├── bsc
+│   │   ├── main.ts
+│   │   └── processor.ts
+│   ├── eth
+│   │   ├── main.ts
+│   │   └── processor.ts
+```
+
+<Note>
+  Alternatively, parameterize your processor using environment variables. You
+  can [set these on a per-processor basis](/en/cloud/reference/manifest/#processor)
+  if you use a deployment manifest.
+</Note>
+
+### 2. Configure processor commands
+
+Add `sqd` commands for running each processor to [`commands.json`](squid-cli/commands-json):
+
+```json commands.json
+{
+  "process:eth": {
+    "deps": ["build", "migration:apply"],
+    "cmd": ["node", "lib/eth/main.js"]
+  },
+  "process:bsc": {
+    "deps": ["build", "migration:apply"],
+    "cmd": ["node", "lib/bsc/main.js"]
+  }
+}
+```
+
+<Info>
+  See the [full
+  example](https://github.com/subsquid-labs/multichain-transfers-example/blob/master/commands.json)
+  in the multichain transfers repository.
+</Info>
+
+### 3. Configure deployment manifest
+
+If you plan to use [`sqd run`](squid-cli/run) for local runs or deploy to [SQD Cloud](cloud), list your processors in the `deploy.processor` section of your [deployment manifest](/en/cloud/reference/manifest/#processor):
+
+```yaml squid.yaml
+deploy:
+  processor:
+    - name: eth-processor
+      cmd: ["sqd", "process:prod:eth"]
+    - name: bsc-processor
+      cmd: ["sqd", "process:prod:bsc"]
+```
+
+<Warning>
+  Make sure to give each processor a unique name to avoid conflicts.
+</Warning>
+
+## PostgreSQL Configuration
+
+When using PostgreSQL, ensure the following:
+
+### 1. Unique state schema for each processor
+
+Each processor needs its own state schema to track sync progress independently:
+
+```typescript src/bsc/main.ts
+processor.run(
+  new TypeormDatabase({
+    stateSchema: "bsc_processor",
+  }),
+  async (ctx) => {
+    // BSC processing logic
+  }
+);
+```
+
+```typescript src/eth/main.ts
+processor.run(
+  new TypeormDatabase({
+    stateSchema: "eth_processor",
+  }),
+  async (ctx) => {
+    // Ethereum processing logic
+  }
+);
+```
+
+<Note>
+  State schemas track the sync progress of each processor independently,
+  enabling reliable multichain indexing.
+</Note>
+
+### 2. Shared schema and API
+
+The [schema](sdk/reference/schema-file) and [GraphQL API](sdk/resources/serving-graphql) should be shared among all processors to provide a unified data model.
+
+### Handling concurrency
+
+- Cross-chain data dependencies are to be avoided. With the [default isolation level](sdk/reference/store/typeorm/#typeormdatabase-constructor-arguments) used by `TypeormDatabase`, `SERIALIZABLE`, one of the processors will crash with an error whenever two cross-dependent transactions are submitted to the database simultaneously. It will write the correct data when restarted, but such restarts can impact performance, especially in squids that use many (>5) processors.
+
+- The alternative isolation level is `READ COMMITTED`. At this level data dependencies will not cause the processors to crash, but the execution is not guaranteed to be deterministic unless the sets of records that different processors read/write do not overlap.
+
+- To avoid cross-chain data dependencies, use per-chain records for volatile data. E.g. if you track account balances across multiple chains you can avoid overlaps by storing the balance for each chain in a different table row.
+
+  When you need to combine the records (e.g. get a total of all balaces across chains) use a [custom resolver](sdk/reference/openreader-server/configuration/custom-resolvers) to do it on the GraphQL server side.
+
+- It is OK to use cross-chain [entities](sdk/reference/schema-file/entities) to simplify aggregation. Just don't store any data in them:
+
+  ```graphql
+  type Account @entity {
+    id: ID! # evm address
+    balances: [Balance!]! @derivedFrom("field": "account")
+  }
+
+  type Balance @entity {
+    id: ID! # chainId + evm address
+    account: Account!
+    value: BigInt!
+  }
+  ```
+
+## On [file-store](sdk/resources/persisting-data/file)
+
+Ensure that you use a unique target folder for each processor.
+
+## Example
+
+A complete example is available [here](https://github.com/subsquid-labs/squid-multichain-template).

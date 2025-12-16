@@ -1,0 +1,145 @@
+---
+title: "Subscriptions"
+description: "Subscribe to updates over a websocket"
+---
+
+# Subscriptions
+
+<Warning>
+  RAM usage of subscriptions scales poorly under high load, making the feature
+  unsuitable for most production uses. There are currently no plans to fix this
+  issue.
+</Warning>
+
+OpenReader supports [GraphQL subscriptions](https://www.apollographql.com/docs/react/data/subscriptions/) via live queries. To use these, a client opens a websocket connection to the server and sends a `subscription` query there. The query body is then repeatedly executed (every 5 seconds by default) and the results are sent to the client whenever they change.
+
+To enable subscriptions, add the additional `--subscriptions` flag to the `squid-graphql-server` startup command. The poll interval is configured with the `--subscription-poll-interval` flag. For details and a full list of available options, run
+
+```bash
+npx squid-graphql-server --help
+```
+
+For each entity types, the following queries are supported for subscriptions:
+
+- `${EntityName}ById` -- query a single entity
+- `${EntityName}s` -- query multiple entities with a `where` filter
+
+<Note>
+  Despite being
+  [deprecated](/en/sdk/squid-sdk/reference/openreader-server/overview#supported-queries)
+  from the regular query set, `${EntityName}s` queries will continue to be
+  available for subscriptions going forward.
+</Note>
+
+## Local runs
+
+To enable subscriptions, add the `--subscriptions` flag to `serve` and `serve:prod` commands at [`commands.json`](/en/sdk/squid-sdk/tools/cli/commands-json):
+
+```json commands.json
+{
+  // ...
+  "serve": {
+    "description": "Start the GraphQL API server",
+    "cmd": ["squid-graphql-server", "--subscriptions"]
+  },
+  "serve:prod": {
+    "description": "Start the GraphQL API server in prod",
+    "cmd": [
+      "squid-graphql-server",
+      "--subscriptions",
+      "--dumb-cache",
+      "in-memory"
+    ]
+  }
+  // ...
+}
+```
+
+A `ws` endpoint will be available the usual `localhost:<GQL_PORT>/graphql` URL.
+
+## SQD Cloud deployments
+
+For SQD Cloud deployments, make sure to use the updated `serve:prod` command in the [deployment manifest](/en/cloud/reference/manifest#deploy):
+
+```yaml squid.yaml
+# ...
+deploy:
+  # other services ...
+  api:
+    cmd: ["sqd", "serve:prod"]
+```
+
+The subscription `wss` endpoint will be available at the canonical API endpoint `wss://{org}.subsquid.io/{name}/v/v{version}/graphql`.
+
+## Example
+
+Let's take the following simple schema with account and transfer entities:
+
+```graphql schema.graphql
+type Account @entity {
+  "Account address"
+  id: ID!
+  transfersTo: [Transfer!] @derivedFrom(field: "to")
+  transfersFrom: [Transfer!] @derivedFrom(field: "from")
+}
+
+type Transfer @entity {
+  id: ID!
+  timestamp: DateTime! @index
+  from: Account!
+  to: Account!
+  amount: BigInt! @index
+}
+```
+
+After modifying `commands.json` start the GraphQL server with subscriptions with
+
+```bash
+npx squid-graphql-server
+```
+
+The following sample [script](https://github.com/subsquid/squid-substrate-template/blob/main/scripts/sub-client.js) will subscribe to the most recent transfers (by `timestamp`).
+
+```typescript
+const WebSocket = require("ws");
+const { createClient } = require("graphql-ws");
+
+const port = process.env.GQL_PORT || 4350;
+const host = process.env.GQL_HOST || "localhost";
+const proto = process.env.GQL_PROTO || "ws";
+
+const client = createClient({
+  webSocketImpl: WebSocket,
+  url: `${proto}://${host}:${port}/graphql`,
+});
+
+client.subscribe(
+  {
+    query: `
+    subscription {
+        transfers(limit: 5, orderBy: timestamp_DESC) {
+            amount
+            blockNumber
+            from {
+              id
+            }
+            to {
+              id
+            }
+        }
+    }  
+    `,
+  },
+  {
+    next: (data) => {
+      console.log(`New transfers: ${JSON.stringify(data)}`);
+    },
+    error: (error) => {
+      console.error("error", error);
+    },
+    complete: () => {
+      console.log("done!");
+    },
+  }
+);
+```
