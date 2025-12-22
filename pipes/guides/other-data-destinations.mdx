@@ -1,0 +1,131 @@
+---
+title: Other data destinations
+description: Saving indexed data to BigQuery and filesystem-based datasets
+---
+
+# Other Data Destinations
+
+Beyond PostgreSQL, Squid SDK supports saving indexed data to various destinations including Google BigQuery and filesystem-based datasets (CSV, Parquet, JSON).
+
+## BigQuery
+
+Squids can store their data to BigQuery datasets using the `@subsquid/bigquery-store` package.
+
+### Basic Usage
+
+Define and use the `Database` object as follows:
+
+```ts title="src/main.ts"
+import {
+  Column,
+  Table,
+  Types,
+  Database
+} from '@subsquid/bigquery-store'
+import {BigQuery} from '@google-cloud/bigquery'
+
+const db = new Database({
+  bq: new BigQuery(),
+  dataset: 'subsquid-datasets.test_dataset',
+  tables: {
+    TransfersTable: new Table(
+      'transfers',
+      {
+        from: Column(Types.String()),
+        to: Column(Types.String()),
+        value: Column(Types.BigNumeric(38))
+      }
+    )
+  }
+})
+
+processor.run(db, async ctx => {
+  // ...
+  let from: string = ...
+  let to: string = ...
+  let value: bigint | number = ...
+  ctx.store.TransfersTable.insert({from, to, value})
+})
+```
+
+### Configuration
+
+- `bq` is a `BigQuery` instance. When created without arguments it'll look at the `GOOGLE_APPLICATION_CREDENTIALS` environment variable for a path to a JSON with authentication details.
+- `dataset` is the path to the target dataset.
+
+<Warning>
+The dataset must be created prior to running the processor.
+</Warning>
+
+- `tables` lists the tables that will be created and populated within the dataset. For every field of the `tables` object an eponymous field of the `ctx.store` object will be created; calling `insert()` or `insertMany()` on such a field will result in data being queued for writing to the corresponding dataset table. The actual writing will be done at the end of the batch in a single transaction, ensuring dataset integrity.
+
+For complete BigQuery documentation, see the [BigQuery store reference](../reference/data-stores/bigquery-store).
+
+## Filesystem Datasets
+
+<Warning>
+Make sure you understand and use the `chunkSizeMb` setting and the `setForceFlush()` store method. Failure to do so may cause the processor to output an empty dataset.
+</Warning>
+
+### Overview
+
+Squid SDK provides append-only [`Store` interface](../reference/data-stores/store-interface) implementations for saving data to files. The store is designed primarily for offline analytics and supports:
+
+- **CSV files** - Using `@subsquid/file-store-csv`
+- **Parquet files** - Using `@subsquid/file-store-parquet`
+- **JSON files** - Using `@subsquid/file-store-json`
+
+Files can be persisted either locally or to S3 storage.
+
+### Basic Example
+
+Save ERC20 `Transfer` events to `transfers.csv` files:
+
+```typescript
+import {EvmBatchProcessor} from '@subsquid/evm-processor'
+import * as erc20abi from './abi/erc20'
+import {Database, LocalDest} from '@subsquid/file-store'
+import {Column, Table, Types} from '@subsquid/file-store-csv'
+
+const processor = /* processor definition */
+
+const dbOptions = {
+  tables: {
+    TransfersTable: new Table('transfers.csv', {
+      from: Column(Types.String()),
+      to: Column(Types.String()),
+      value: Column(Types.Numeric())
+    })
+  },
+  dest: new LocalDest('./data'),
+  chunkSizeMb: 10
+}
+
+processor.run(new Database(dbOptions), async (ctx) => {
+  for (let c of ctx.blocks) {
+    for (let log of c.logs) {
+      let {from, to, value} = erc20abi.events.Transfer.decode(log)
+      ctx.store.TransfersTable.write({
+        from,
+        to,
+        value: value.toString()
+      })
+    }
+  }
+})
+```
+
+### Data Partitioning
+
+File-based stores always partition datasets along the "block height" dimension, even when it is not in the schema. A new partition is written when either:
+- The internal buffer (size governed by `chunkSizeMb`) fills up, or
+- There's a call to `setForceFlush()` during batch processing
+
+Same failover guarantees as with the Postgres-based store are provided: the processor will roll back to the last successful state after a restart.
+
+### Storage Destinations
+
+- **Local filesystem** - Using `LocalDest` class
+- **S3-compatible storage** - Using `S3Dest` class for AWS S3, Google Cloud Storage, or other S3-compatible services
+
+For complete filesystem store documentation, see the [file-store reference](../reference/data-stores/file-store).
