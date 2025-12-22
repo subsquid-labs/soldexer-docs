@@ -1,0 +1,148 @@
+---
+title: "Query Builder"
+description: "API reference for SolanaQueryBuilder"
+---
+
+## SolanaQueryBuilder
+
+Build queries for Portal API.
+
+```ts
+class SolanaQueryBuilder {
+  addFields(fields: FieldSelection): this;
+  addInstruction(config: InstructionRequest): this;
+  addTransaction(config: TransactionRequest): this;
+  addLog(config: LogRequest): this;
+  addBalance(config: BalanceRequest): this;
+  addTokenBalance(config: TokenBalanceRequest): this;
+  addReward(config: RewardRequest): this;
+  includeAllBlocks(range?: Range): this;
+}
+```
+
+## addFields
+
+Select fields to return. Returns a new builder with merged field selections.
+
+```ts
+queryBuilder.addFields({
+  block: { slot: true, hash: true, timestamp: true },
+  instruction: { programId: true, data: true, accounts: true },
+  transaction: { signatures: true, transactionIndex: true },
+});
+```
+
+Block `slot` and `hash` fields are required.
+
+## addInstruction
+
+Filter program instructions.
+
+```ts
+queryBuilder.addInstruction({
+  request: {
+    programId: ["whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"],
+    d8: ["0xf8c69e91e17587c8"], // 8-byte instruction discriminator
+    a0: ["AccountAddress"], // Account at position 0 (optional)
+  },
+  range: { from: 200000000, to: 200001000 },
+});
+```
+
+## addTransaction
+
+Filter transactions.
+
+```ts
+queryBuilder.addTransaction({
+  request: {
+    signatures: ["TransactionSignature"],
+    feePayer: ["FeePayerAddress"],
+  },
+  range: { from: 200000000 },
+});
+```
+
+## addLog
+
+Filter program logs.
+
+```ts
+queryBuilder.addLog({
+  request: {
+    programId: ["ProgramAddress"],
+    kind: ["program"], // "program", "data", or "other"
+  },
+  range: { from: 200000000 },
+});
+```
+
+## addBalance
+
+Filter account balance changes.
+
+```ts
+queryBuilder.addBalance({
+  request: {
+    account: ["AccountAddress"],
+  },
+  range: { from: 200000000 },
+});
+```
+
+## addTokenBalance
+
+Filter token balance changes.
+
+```ts
+queryBuilder.addTokenBalance({
+  request: {
+    account: ["TokenAccountAddress"],
+    preMint: ["TokenMintAddress"],
+    postMint: ["TokenMintAddress"],
+  },
+  range: { from: 200000000 },
+});
+```
+
+## addReward
+
+Filter validator rewards.
+
+```ts
+queryBuilder.addReward({
+  request: {
+    pubkey: ["ValidatorPubkey"],
+  },
+  range: { from: 200000000 },
+});
+```
+
+## includeAllBlocks
+
+Include all blocks in the specified range, even if they don't match any filters.
+
+```ts
+queryBuilder.includeAllBlocks({ from: 200000000, to: 200001000 });
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Instruction Decoder"
+    icon="code"
+    href="/en/sdk/pipes-sdk/solana/reference/instruction-decoder"
+  >
+    Instruction decoder API
+  </Card>
+
+  <Card
+    title="Types & Pipe Methods"
+    icon="code"
+    href="/en/sdk/pipes-sdk/solana/reference/types-methods"
+  >
+    Types and methods
+  </Card>
+</CardGroup>
+

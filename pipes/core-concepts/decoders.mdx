@@ -1,0 +1,211 @@
+---
+title: "Instruction Decoder"
+description: "Decode Solana program instructions with typed ABIs"
+---
+
+The `solanaInstructionDecoder` automatically decodes Solana program instructions using generated ABIs, providing typed access to instruction data.
+
+## Basic Usage
+
+```ts
+import { solanaPortalSource, solanaInstructionDecoder } from '@subsquid/pipes/solana'
+import { createTarget } from '@subsquid/pipes'
+import * as orcaWhirlpool from './abi/orca_whirlpool/index.js'
+
+const source = solanaPortalSource({
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+})
+
+const decoder = solanaInstructionDecoder({
+  programId: orcaWhirlpool.programId,
+  instructions: {
+    swap: orcaWhirlpool.instructions.swap,
+    swapV2: orcaWhirlpool.instructions.swapV2,
+  },
+  range: { from: 200000000, to: 200001000 },
+})
+
+const target = createTarget({
+  write: async ({ logger, read }) => {
+    for await (const { data } of read()) {
+      // data.swap and data.swapV2 contain decoded instructions
+      for (const swap of data.swap) {
+        logger.info({
+          slot: swap.blockNumber,
+          programId: swap.programId,
+          instruction: swap.instruction, // Typed instruction data
+        })
+      }
+    }
+  },
+})
+
+await source.pipe(decoder).pipeTo(target)
+```
+
+## Configuration
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `programId` | `string \| string[]` | Yes | Program address(es) to filter |
+| `instructions` | `Record<string, InstructionDef>` | Yes | Map of instruction names to ABI definitions |
+| `range` | `PortalRange` | Yes | Slot range to process |
+| `profiler` | `ProfilerOptions` | No | Profiler configuration (default: `{ id: 'instruction decoder' }`) |
+| `onError` | `(ctx, error) => unknown` | No | Error handler (default: throws error) |
+
+## Decoded Instruction Structure
+
+Each decoded instruction contains:
+
+```ts
+{
+  blockNumber: number,        // Slot number
+  timestamp: Date,            // Block timestamp
+  programId: string,          // Program address
+  transaction: {
+    signatures: string[],     // Transaction signatures
+    // ... other transaction fields
+  },
+  rawInstruction: {
+    data: string,             // Raw instruction data
+    accounts: string[],       // Account addresses
+    instructionAddress: number[],
+  },
+  instruction: {              // Decoded instruction data (typed)
+    // Fields depend on the instruction type
+  },
+  tokenBalances?: [...],      // Token balance changes if requested
+}
+```
+
+## Discriminators
+
+Solana programs use discriminators to identify instruction types. The SDK supports multiple discriminator sizes:
+
+| Name | Hex Characters | Bytes | Common Use |
+|------|----------------|-------|------------|
+| `d1` | 4 chars | 2 bytes | Simple programs |
+| `d2` | 8 chars | 4 bytes | Some native programs |
+| `d4` | 14 chars | 7 bytes | Custom programs |
+| `d8` | 18 chars | 9 bytes | Anchor programs (most common) |
+
+When using `solanaInstructionDecoder`, discriminators are handled automatically based on the ABI.
+
+For manual queries with `SolanaQueryBuilder`:
+
+```ts
+queryBuilder.addInstruction({
+  request: {
+    programId: ['whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc'],
+    d8: ['0xf8c69e91e17587c8'], // 8-byte Anchor discriminator
+  },
+  range: { from: 200000000 },
+})
+```
+
+## Generating ABIs
+
+Use `@subsquid/solana-typegen` to generate typed ABIs from program IDLs:
+
+```bash
+npx @subsquid/solana-typegen src/abi program-idl.json
+```
+
+This generates TypeScript types for all instructions, including:
+- `programId` - The program address
+- `instructions` - Typed instruction definitions with discriminators
+
+### Using Generated ABIs
+
+```ts
+import * as myProgram from './abi/my_program/index.js'
+
+const decoder = solanaInstructionDecoder({
+  programId: myProgram.programId,
+  instructions: {
+    myInstruction: myProgram.instructions.myInstruction,
+    anotherInstruction: myProgram.instructions.anotherInstruction,
+  },
+  range: { from: 200000000 },
+})
+```
+
+## Multiple Instruction Types
+
+Decode multiple instructions from the same program:
+
+```ts
+const decoder = solanaInstructionDecoder({
+  programId: orcaWhirlpool.programId,
+  instructions: {
+    swap: orcaWhirlpool.instructions.swap,
+    swapV2: orcaWhirlpool.instructions.swapV2,
+    openPosition: orcaWhirlpool.instructions.openPosition,
+    closePosition: orcaWhirlpool.instructions.closePosition,
+  },
+  range: { from: 200000000 },
+})
+
+// Access each instruction type
+for await (const { data } of source.pipe(decoder)) {
+  console.log(`Swaps: ${data.swap.length + data.swapV2.length}`)
+  console.log(`Positions opened: ${data.openPosition.length}`)
+  console.log(`Positions closed: ${data.closePosition.length}`)
+}
+```
+
+## Composite Decoding
+
+Decode instructions from multiple programs simultaneously:
+
+```ts
+import * as orcaWhirlpool from './abi/orca_whirlpool/index.js'
+import * as raydiumAmm from './abi/raydium-amm/index.js'
+
+const pipeline = source.pipeComposite({
+  orca: solanaInstructionDecoder({
+    programId: orcaWhirlpool.programId,
+    instructions: {
+      swap: orcaWhirlpool.instructions.swap,
+      swapV2: orcaWhirlpool.instructions.swapV2,
+    },
+    range: { from: 200000000 },
+  }),
+  raydium: solanaInstructionDecoder({
+    programId: raydiumAmm.programId,
+    instructions: {
+      swapBaseIn: raydiumAmm.instructions.swapBaseIn,
+      swapBaseOut: raydiumAmm.instructions.swapBaseOut,
+    },
+    range: { from: 200000000 },
+  }),
+})
+
+for await (const { data } of pipeline) {
+  console.log(`Orca swaps: ${data.orca.swap.length}`)
+  console.log(`Raydium swaps: ${data.raydium.swapBaseIn.length}`)
+}
+```
+
+## Query Building
+
+The decoder automatically builds the Portal query based on the configured instructions. You don't need to manually configure `SolanaQueryBuilder` when using the decoder - it handles:
+
+- Field selection for instructions and related data
+- Discriminator-based filtering
+- Range configuration
+
+```ts
+// No query builder needed - decoder handles it
+const source = solanaPortalSource({
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+})
+
+const decoder = solanaInstructionDecoder({
+  programId: orcaWhirlpool.programId,
+  instructions: { swap: orcaWhirlpool.instructions.swap },
+  range: { from: 200000000 },
+})
+
+await source.pipe(decoder).pipeTo(target)
+```

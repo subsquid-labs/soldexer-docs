@@ -1,0 +1,147 @@
+---
+title: "API Reference"
+description: "Quick reference for Solana Pipes SDK APIs"
+---
+
+This page provides a quick reference to all Solana Pipes SDK exports. For detailed documentation, see the linked pages.
+
+## Main Exports
+
+Import from `@subsquid/pipes/solana`:
+
+```ts
+import {
+  solanaPortalSource,
+  SolanaQueryBuilder,
+  solanaInstructionDecoder,
+  solanaRpcLatencyWatcher,
+} from '@subsquid/pipes/solana'
+```
+
+## Functions
+
+| Function | Description | Reference |
+|----------|-------------|-----------|
+| `solanaPortalSource()` | Creates a data source connected to Subsquid Portal | [Sources](/en/sdk/pipes-sdk/solana/reference/sources) |
+| `solanaInstructionDecoder()` | Decodes program instructions using ABIs | [Instruction Decoder](/en/sdk/pipes-sdk/solana/reference/instruction-decoder) |
+| `solanaRpcLatencyWatcher()` | Monitors RPC latency for performance tracking | [RPC Latency Watcher](/en/sdk/pipes-sdk/solana/reference/rpc-latency-watcher) |
+
+## Classes
+
+| Class | Description | Reference |
+|-------|-------------|-----------|
+| `SolanaQueryBuilder` | Builds queries for the Portal API | [Query Builder](/en/sdk/pipes-sdk/solana/reference/query-builder) |
+
+## Core Functions (from `@subsquid/pipes`)
+
+| Function | Description | Reference |
+|----------|-------------|-----------|
+| `createTransformer()` | Creates a data transformer | [Transformers](/en/sdk/pipes-sdk/solana/reference/transformers) |
+| `createTarget()` | Creates a custom data target | [Targets](/en/sdk/pipes-sdk/solana/reference/targets) |
+
+## Types
+
+| Type | Description |
+|------|-------------|
+| `SolanaPortalData<F>` | Data returned from Portal source (`{ blocks: Block<F>[] }`) |
+| `SolanaTransformer<In, Out>` | Transformer type for Solana pipelines |
+| `DecodedInstruction<D>` | Decoded instruction structure with metadata |
+| `AbiDecodeInstruction<T>` | Type helper for extracting decoded instruction type |
+| `EventResponse<T>` | Response type from instruction decoder |
+| `Instructions` | Type for instruction ABI configuration |
+
+## Discriminator Helpers
+
+Low-level functions for extracting instruction discriminators:
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `getInstructionD1(instruction)` | 4 hex chars | Extract 2-byte discriminator |
+| `getInstructionD2(instruction)` | 8 hex chars | Extract 4-byte discriminator |
+| `getInstructionD4(instruction)` | 14 hex chars | Extract 7-byte discriminator |
+| `getInstructionD8(instruction)` | 18 hex chars | Extract 9-byte discriminator |
+
+Symbols: `D0_SYM`, `D1_SYM`, `D2_SYM`, `D4_SYM`
+
+## Quick Examples
+
+### Basic Pipeline
+
+```ts
+import { createTarget } from '@subsquid/pipes'
+import { solanaPortalSource, SolanaQueryBuilder } from '@subsquid/pipes/solana'
+
+const source = solanaPortalSource({
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+  query: new SolanaQueryBuilder()
+    .addFields({ block: { slot: true, hash: true } })
+    .addInstruction({
+      request: { programId: ['...'] },
+      range: { from: 200000000 },
+    }),
+})
+
+await source.pipeTo(createTarget({
+  write: async ({ read }) => {
+    for await (const { data } of read()) {
+      console.log(data)
+    }
+  },
+}))
+```
+
+### With Instruction Decoder
+
+```ts
+import { solanaPortalSource, solanaInstructionDecoder } from '@subsquid/pipes/solana'
+import * as orcaWhirlpool from './abi/orca_whirlpool/index.js'
+
+const source = solanaPortalSource({
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+})
+
+const decoder = solanaInstructionDecoder({
+  programId: orcaWhirlpool.programId,
+  instructions: { swap: orcaWhirlpool.instructions.swap },
+  range: { from: 200000000 },
+})
+
+for await (const { data } of source.pipe(decoder)) {
+  console.log(data.swap)
+}
+```
+
+### Composite Pipeline
+
+```ts
+const pipeline = source.pipeComposite({
+  orca: solanaInstructionDecoder({ ... }),
+  raydium: solanaInstructionDecoder({ ... }),
+})
+
+for await (const { data } of pipeline) {
+  console.log(data.orca, data.raydium)
+}
+```
+
+## Available Networks
+
+| Network | Portal URL |
+|---------|------------|
+| Solana Mainnet | `https://portal.sqd.dev/datasets/solana-mainnet` |
+| Solana Devnet | `https://portal.sqd.dev/datasets/solana-devnet` |
+
+## Package Versions
+
+Ensure you're using compatible package versions:
+
+```json
+{
+  "dependencies": {
+    "@subsquid/pipes": "latest"
+  },
+  "devDependencies": {
+    "@subsquid/solana-typegen": "latest"
+  }
+}
+```

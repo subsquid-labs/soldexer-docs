@@ -1,0 +1,63 @@
+---
+title: "What is Pipes SDK?"
+description: "Understanding the motivation, architecture, and use cases for Pipes SDK on Solana"
+---
+
+## Why Pipes SDK?
+
+Pipes SDK was built to provide **extreme flexibility and extensibility** for blockchain data indexing. Unlike traditional indexing frameworks that lock you into specific databases or APIs, Pipes SDK lets you:
+
+- **Integrate with existing systems**: Stream Solana blockchain data into your current infrastructure without restructuring your entire stack
+- **Choose your own storage**: Use any database, data lake, or message queue as your target
+- **Build custom pipelines**: Transform and route data exactly how you need it, with full control over every step
+- **Work as a library**: Embed Pipes SDK into larger applications, microservices, or data processing workflows
+
+Pipes SDK is designed for teams that need more control than a full-stack framework provides, but want more structure than raw RPC access.
+
+<CardGroup cols={2}>
+<Card title="Solana Core Concepts" icon="book" href="/en/sdk/pipes-sdk/solana/core-concepts/overview">
+Learn about Sources, Query Builder, Decoders, and Targets for Solana
+</Card>
+
+<Card title="Quickstart" icon="rocket" href="/en/sdk/pipes-sdk/solana/quickstart">
+Get started with Solana Pipes SDK in minutes
+</Card>
+</CardGroup>
+
+## When to Use Pipes SDK
+
+<CardGroup cols={2}>
+<Card title="Use Pipes SDK when you need" icon="check">
+- Custom database or storage solution
+- Integration with existing infrastructure
+- Lightweight, minimal dependencies
+- Full control over data flow
+</Card>
+
+<Card title="Use Squid SDK when you need" icon="server">
+- Built-in PostgreSQL + TypeORM
+- Auto-generated GraphQL API
+- Rapid prototyping
+- Standard dApp backend
+- Managed database migrations
+</Card>
+</CardGroup>
+
+## Architecture Flexibility
+
+Pipes SDK's modular design means you can:
+
+- **Mix and match components**: Use Portal sources with custom transformers and your own targets
+- **Extend easily**: Create custom transformers for domain-specific logic
+- **Scale independently**: Run multiple pipelines with different configurations
+- **Deploy anywhere**: Works in Node.js, Docker, Kubernetes, or serverless environments
+
+## Solana-Specific Features
+
+Pipes SDK for Solana includes:
+
+- **Instruction Decoding**: Decode program instructions using generated ABIs from IDLs
+- **Discriminator Support**: Automatic handling of Anchor and native program discriminators (d1, d2, d4, d8)
+- **Token Balance Tracking**: Track SPL token balance changes across transactions
+- **Query Builder**: Filter by program ID, instruction discriminator, accounts, and more
+- **RPC Latency Monitoring**: Built-in tools to monitor Solana RPC performance

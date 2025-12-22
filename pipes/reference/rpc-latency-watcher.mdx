@@ -1,0 +1,201 @@
+---
+title: "RPC Latency Watcher"
+description: "Monitor RPC latency and compare with Portal performance"
+---
+
+The `solanaRpcLatencyWatcher` function monitors the latency between Portal and external RPC providers, helping you track indexing performance.
+
+## Import
+
+```ts
+import { solanaRpcLatencyWatcher } from '@subsquid/pipes/solana'
+```
+
+## Signature
+
+```ts
+function solanaRpcLatencyWatcher(options: {
+  rpcUrl: string[]
+}): RpcLatencyWatcher
+```
+
+## Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `rpcUrl` | `string[]` | Array of RPC endpoint URLs to monitor |
+
+## Return Value
+
+Returns a transformer that can be piped to add latency data to the stream.
+
+## Output Data Structure
+
+Each output contains:
+
+```ts
+{
+  number: number,           // Slot number
+  timestamp: Date,          // Block timestamp
+  rpc: Array<{
+    url: string,            // RPC endpoint URL
+    receivedAt: Date,       // When block was received from RPC
+    portalDelayMs: number,  // Delay between RPC and Portal (ms)
+  }>
+}
+```
+
+## Basic Usage
+
+```ts
+import { solanaPortalSource, solanaRpcLatencyWatcher } from '@subsquid/pipes/solana'
+
+const stream = solanaPortalSource({
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+  query: { from: 'latest' },
+}).pipe(
+  solanaRpcLatencyWatcher({
+    rpcUrl: ['https://api.mainnet-beta.solana.com'],
+  })
+)
+
+for await (const { data } of stream) {
+  if (!data) continue
+
+  console.log(`Slot: ${data.number}`)
+  console.table(data.rpc)
+}
+```
+
+## Example Output
+
+```
+-------------------------------------
+BLOCK DATA: 369,377,455 / Fri Sep 26 2025 15:31:36 GMT+0400
+┌───┬─────────────────────────────────────┬──────────────────────────┬───────────────┐
+│   │ url                                 │ receivedAt               │ portalDelayMs │
+├───┼─────────────────────────────────────┼──────────────────────────┼───────────────┤
+│ 0 │ https://api.mainnet-beta.solana.com │ 2025-09-26T11:31:37.075Z │ 358           │
+└───┴─────────────────────────────────────┴──────────────────────────┴───────────────┘
+```
+
+## Multiple RPC Endpoints
+
+Monitor multiple RPC providers simultaneously:
+
+```ts
+const stream = solanaPortalSource({
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+  query: { from: 'latest' },
+}).pipe(
+  solanaRpcLatencyWatcher({
+    rpcUrl: [
+      'https://api.mainnet-beta.solana.com',
+      'https://solana-mainnet.rpc.extrnode.com',
+    ],
+  })
+)
+```
+
+## Metrics Integration
+
+Export latency data to Prometheus or other monitoring systems:
+
+```ts
+const stream = solanaPortalSource({
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+  query: { from: 'latest' },
+}).pipe(
+  solanaRpcLatencyWatcher({
+    rpcUrl: ['https://api.mainnet-beta.solana.com'],
+  }).pipe({
+    profiler: { id: 'expose metrics' },
+    transform: (data, { metrics }) => {
+      if (!data) return
+
+      for (const rpc of data.rpc) {
+        metrics
+          .gauge({
+            name: 'rpc_latency_ms',
+            help: 'RPC Latency in ms',
+            labelNames: ['url'],
+          })
+          .set({ url: rpc.url }, rpc.portalDelayMs)
+      }
+
+      return data
+    },
+  })
+)
+```
+
+## Prometheus Export
+
+Full example with HTTP metrics endpoint:
+
+```ts
+import { solanaPortalSource, solanaRpcLatencyWatcher } from '@subsquid/pipes/solana'
+import { Registry, Counter } from 'prom-client'
+import http from 'http'
+
+const registry = new Registry()
+const latencyCounter = new Counter({
+  name: 'portal_latency_ms_total',
+  help: 'Total Portal latency in milliseconds',
+  registers: [registry],
+})
+
+const stream = solanaPortalSource({
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+  query: { from: 'latest' },
+}).pipe(
+  solanaRpcLatencyWatcher({
+    rpcUrl: ['https://api.mainnet-beta.solana.com'],
+  }).pipe({
+    transform: (data) => {
+      if (!data) return
+
+      for (const rpc of data.rpc) {
+        latencyCounter.inc(rpc.portalDelayMs)
+      }
+
+      return data
+    },
+  })
+)
+
+// Expose metrics endpoint
+const server = http.createServer(async (req, res) => {
+  if (req.url === '/metrics') {
+    res.setHeader('Content-Type', registry.contentType)
+    res.end(await registry.metrics())
+  } else {
+    res.end('OK')
+  }
+})
+server.listen(9090)
+
+for await (const { data } of stream) {
+  // Process blocks
+}
+```
+
+## How It Works
+
+The RPC latency watcher:
+
+1. Subscribes to slot updates via WebSocket (`slotsUpdatesSubscribe`)
+2. Listens for `optimisticConfirmation` events from each RPC
+3. Compares the arrival time of blocks between RPC and Portal
+4. Reports the delay as `portalDelayMs`
+
+<Warning>
+The measured values include client-side network latency. For RPC, only the arrival time of the block is measured—this does not capture the node's internal processing latency.
+</Warning>
+
+## Use Cases
+
+- **Performance monitoring** - Track indexing latency in production
+- **RPC comparison** - Compare performance across different RPC providers
+- **Alerting** - Trigger alerts when latency exceeds thresholds
+- **Optimization** - Identify bottlenecks in your indexing pipeline

@@ -1,0 +1,110 @@
+---
+title: "Targets"
+description: "API reference for targets"
+---
+
+## createTarget
+
+Create a data sink.
+
+```ts
+createTarget(config: TargetConfig): Target
+```
+
+**Parameters:**
+
+- `write`: Write function `async ({ctx, read}) => void` (required)
+- `fork`: Fork handler `async (previousBlocks: BlockCursor[]) => BlockCursor | null` (optional)
+
+**Example:**
+
+```ts
+const target = createTarget({
+  write: async ({ logger, read }) => {
+    for await (const { data } of read()) {
+      await database.save(data);
+    }
+  },
+  onRollback: async ({ cursor }) => {
+    await database.deleteAfter(cursor.number);
+  },
+});
+```
+
+## clickhouseTarget
+
+ClickHouse target with automatic cursor management.
+
+```ts
+clickhouseTarget(config: ClickhouseTargetConfig): Target
+```
+
+**Parameters:**
+
+- `client`: ClickHouse client instance (required)
+- `settings`: Configuration options (optional)
+- `onStart`: Initialization handler `async ({store, logger}) => void` (optional)
+- `onData`: Data handler `async ({store, data, ctx}) => void` (required)
+- `onRollback`: Rollback handler `async ({store, safeCursor, type}) => void` (optional)
+
+**Example:**
+
+```ts
+const target = clickhouseTarget({
+  client,
+  onData: async ({store, data}) => {
+    store.insert({
+      table: 'swaps',
+      values: data.swap.map(s => ({
+        slot_number: s.blockNumber,
+        transaction_hash: s.transaction.signatures[0],
+        program_id: s.programId,
+      })),
+      format: 'JSONEachRow'
+    })
+  },
+  onRollback: async ({store, safeCursor}) => {
+    await store.removeAllRows({
+      tables: ['swaps'],
+      where: `slot_number > ${safeCursor.number}`
+    })
+  }
+})
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Transformers"
+    icon="wand-magic-sparkles"
+    href="/en/sdk/pipes-sdk/solana/reference/transformers"
+  >
+    Data transformers
+  </Card>
+
+  <Card
+    title="Sources"
+    icon="arrow-left"
+    href="/en/sdk/pipes-sdk/solana/reference/sources"
+  >
+    Data sources
+  </Card>
+
+  <Card
+    title="Query Builder"
+    icon="filter"
+    href="/en/sdk/pipes-sdk/solana/reference/query-builder"
+  >
+    Query builder API
+  </Card>
+
+  <Card
+    title="Examples"
+    icon="lightbulb"
+    href="/en/sdk/pipes-sdk/solana/examples/getting-started"
+  >
+    See examples
+  </Card>
+</CardGroup>
+

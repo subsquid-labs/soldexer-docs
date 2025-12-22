@@ -1,0 +1,197 @@
+---
+title: "Instruction Decoding"
+description: "Decode Solana program instructions"
+---
+
+## Orca Whirlpool Decoder
+
+Decode Orca Whirlpool swap instructions.
+
+**Use case**: Decode DEX swap instructions with typed instruction data.
+
+```ts
+import { createTarget } from "@subsquid/pipes";
+import {
+  solanaPortalSource,
+  solanaInstructionDecoder,
+} from "@subsquid/pipes/solana";
+import * as orcaWhirlpool from "./abi/orca_whirlpool/index.js";
+
+const source = solanaPortalSource({
+  portal: "https://portal.sqd.dev/datasets/solana-mainnet",
+});
+
+const decoder = solanaInstructionDecoder({
+  range: { from: 200000000, to: 200001000 },
+  programId: orcaWhirlpool.programId,
+  instructions: {
+    swap: orcaWhirlpool.instructions.swap,
+    swapV2: orcaWhirlpool.instructions.swapV2,
+  },
+});
+
+const target = createTarget({
+  write: async ({ logger, read }) => {
+    for await (const { data } of read()) {
+      for (const swap of [...data.swap, ...data.swapV2]) {
+        logger.info({
+          slot: swap.blockNumber,
+          tx: swap.transaction.signatures[0],
+          programId: swap.programId,
+        });
+      }
+    }
+  },
+});
+
+await source.pipe(decoder).pipeTo(target);
+```
+
+### Data Flow
+
+```mermaid
+graph LR
+    A[Portal Source] --> B[Solana Instruction Decoder]
+    B --> C[Typed Instructions]
+    C --> D[Target]
+
+    style A fill:#dbeafe
+    style B fill:#dbeafe
+    style C fill:#dbeafe
+    style D fill:#dbeafe
+```
+
+## Composite Decoder
+
+Decode multiple instruction types simultaneously.
+
+**Use case**: Index swaps from multiple DEX programs in one pipe.
+
+```ts expandable
+import { createTarget } from "@subsquid/pipes";
+import {
+  solanaPortalSource,
+  solanaInstructionDecoder,
+} from "@subsquid/pipes/solana";
+import * as orcaWhirlpool from "./abi/orca_whirlpool/index.js";
+import * as raydiumAmm from "./abi/raydium-amm/index.js";
+
+const source = solanaPortalSource({
+  portal: "https://portal.sqd.dev/datasets/solana-mainnet",
+});
+
+const pipeline = source.pipeComposite({
+  orca: solanaInstructionDecoder({
+    range: { from: 200000000, to: 200001000 },
+    programId: orcaWhirlpool.programId,
+    instructions: {
+      swap: orcaWhirlpool.instructions.swap,
+      swapV2: orcaWhirlpool.instructions.swapV2,
+    },
+  }),
+  raydium: solanaInstructionDecoder({
+    range: { from: 200000000, to: 200001000 },
+    programId: raydiumAmm.programId,
+    instructions: {
+      swapBaseIn: raydiumAmm.instructions.swapBaseIn,
+      swapBaseOut: raydiumAmm.instructions.swapBaseOut,
+    },
+  }),
+});
+
+const target = createTarget({
+  write: async ({ logger, read }) => {
+    for await (const { data } of read()) {
+      logger.info({
+        orcaSwaps: data.orca.swap.length + data.orca.swapV2.length,
+        raydiumSwaps: data.raydium.swapBaseIn.length + data.raydium.swapBaseOut.length,
+      });
+    }
+  },
+});
+
+await pipeline.pipeTo(target);
+```
+
+## Multiple Instruction Types
+
+Decode multiple instruction types from the same program.
+
+**Use case**: Index multiple instruction types from one program.
+
+<Tip>
+  Use `@subsquid/solana-typegen` to generate typed ABIs instead of manually finding
+  instruction discriminators. This approach provides type safety and eliminates the
+  need to look up d8 values. See the [Custom ABI](#custom-abi) section below.
+</Tip>
+
+```ts expandable
+import { createTarget } from "@subsquid/pipes";
+import {
+  solanaPortalSource,
+  solanaInstructionDecoder,
+} from "@subsquid/pipes/solana";
+import * as orcaWhirlpool from "./abi/orca_whirlpool/index.js";
+
+const source = solanaPortalSource({
+  portal: "https://portal.sqd.dev/datasets/solana-mainnet",
+});
+
+const decoder = solanaInstructionDecoder({
+  range: { from: 200000000, to: 200001000 },
+  programId: orcaWhirlpool.programId,
+  instructions: {
+    swap: orcaWhirlpool.instructions.swap,
+    swapV2: orcaWhirlpool.instructions.swapV2,
+    openPosition: orcaWhirlpool.instructions.openPosition,
+    closePosition: orcaWhirlpool.instructions.closePosition,
+  },
+});
+
+const target = createTarget({
+  write: async ({ logger, read }) => {
+    for await (const { data } of read()) {
+      logger.info({
+        swaps: data.swap.length + data.swapV2.length,
+        positionsOpened: data.openPosition.length,
+        positionsClosed: data.closePosition.length,
+      });
+    }
+  },
+});
+
+await source.pipe(decoder).pipeTo(target);
+```
+
+## Custom ABI
+
+Generate and use custom ABIs.
+
+**Use case**: Index instructions from programs with custom ABIs.
+
+### Generate ABI
+
+```bash
+npx @subsquid/solana-typegen src/abi program-idl.json
+```
+
+### Use Generated ABI
+
+```ts
+import { solanaPortalSource, solanaInstructionDecoder } from "@subsquid/pipes/solana";
+import * as myProgramAbi from "./abi/MyProgram";
+
+const decoder = solanaInstructionDecoder({
+  range: { from: 200000000 },
+  programId: myProgramAbi.programId,
+  instructions: {
+    myInstruction: myProgramAbi.instructions.MyCustomInstruction,
+    anotherInstruction: myProgramAbi.instructions.AnotherInstruction,
+  },
+});
+
+for await (const { data } of source.pipe(decoder)) {
+  console.log(data.myInstruction);
+  console.log(data.anotherInstruction);
+}
+```

@@ -1,0 +1,106 @@
+---
+title: "Transformers"
+description: "API reference for transformers"
+---
+
+## Instruction Decoder Transformers
+
+### solanaInstructionDecoder
+
+Create a transformer that decodes Solana program instructions.
+
+```ts
+solanaInstructionDecoder<T>(config: SolanaInstructionDecoderConfig<T>): Transformer
+```
+
+**Returns:** A `Transformer` that transforms `SolanaPortalData` into decoded instructions.
+
+**Parameters:**
+
+- `range`: Slot range `{ from: number | string | 'latest', to?: number }` (required)
+- `programId`: Program address(es) `string | string[]` (required)
+- `instructions`: Map of instruction names to ABI instruction objects (required)
+- `profiler`: Profiler config `{ id: string }` (optional)
+- `onError`: Error handler (optional)
+
+**Example:**
+
+```ts
+const transformer = solanaInstructionDecoder({
+  range: { from: 200000000, to: 201000000 },
+  programId: orcaWhirlpool.programId,
+  instructions: {
+    swap: orcaWhirlpool.instructions.swap,
+  },
+});
+```
+
+See the [Instruction Decoder reference](/en/sdk/pipes-sdk/solana/reference/instruction-decoder) for complete details.
+
+## Generic Transformers
+
+### createTransformer
+
+Transform data in pipes.
+
+```ts
+createTransformer<I, O>(config: TransformerConfig<I, O>): Transformer<I, O>
+```
+
+**Parameters:**
+
+- `transform`: Transform function `async (data: I, ctx) => O` (required)
+- `query`: Query callback `({queryBuilder, portal, logger}) => void` (optional)
+
+**Example:**
+
+```ts
+const transformer = createTransformer({
+  query: ({ queryBuilder }) => {
+    queryBuilder.addInstruction({
+      request: { programId: ["whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"] },
+      range: { from: 200000000 },
+    });
+  },
+  transform: async (data) => {
+    return data.blocks.map((b) => b.instructions);
+  },
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Targets"
+    icon="bullseye"
+    href="/en/sdk/pipes-sdk/solana/reference/targets"
+  >
+    Data persistence targets
+  </Card>
+
+  <Card
+    title="Query Builder"
+    icon="filter"
+    href="/en/sdk/pipes-sdk/solana/reference/query-builder"
+  >
+    Query builder API
+  </Card>
+
+  <Card
+    title="Sources"
+    icon="arrow-left"
+    href="/en/sdk/pipes-sdk/solana/reference/sources"
+  >
+    Data sources
+  </Card>
+
+  <Card
+    title="Instruction Decoder"
+    icon="code"
+    href="/en/sdk/pipes-sdk/solana/reference/instruction-decoder"
+  >
+    Instruction decoder reference
+  </Card>
+</CardGroup>
+

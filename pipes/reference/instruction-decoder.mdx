@@ -1,0 +1,133 @@
+---
+title: "Instruction Decoder"
+description: "API reference for Solana instruction decoder"
+---
+
+## solanaInstructionDecoder
+
+Create a transformer that decodes Solana program instructions.
+
+```ts
+solanaInstructionDecoder<T>(config: SolanaInstructionDecoderConfig<T>): Transformer
+```
+
+**Returns:** A `Transformer` that transforms `SolanaPortalData` into decoded instructions.
+
+**Parameters:**
+
+- `range`: Slot range `{ from: number | string | 'latest', to?: number }` (required)
+- `programId`: Program address(es) `string | string[]` (required)
+- `instructions`: Map of instruction names to ABI instruction objects (required)
+- `profiler`: Profiler config `{ id: string }` (optional)
+- `onError`: Error handler `(ctx: BatchCtx, error: any) => unknown | Promise<unknown>` (optional)
+
+**Example:**
+
+```ts
+const transformer = solanaInstructionDecoder({
+  range: { from: 200000000, to: 201000000 },
+  programId: orcaWhirlpool.programId,
+  instructions: {
+    swap: orcaWhirlpool.instructions.swap,
+    swapV2: orcaWhirlpool.instructions.swapV2,
+  },
+});
+```
+
+<Tip>
+Use `@subsquid/solana-typegen` to generate typed ABIs for custom programs. This provides type safety and eliminates the need to manually find instruction discriminators. See the [Solana SDK typegen documentation](/en/sdk/squid-sdk/solana/sdk/typegen) for details on generating and using custom ABIs.
+</Tip>
+
+<Note>
+`solanaInstructionDecoder` returns a `Transformer` that automatically builds the necessary queries for instruction decoding. You don't need a query builder when using this transformer - it handles query construction internally. However, you still need a portal source.
+</Note>
+
+<Tip>
+Use the `AbiDecodeInstruction` type helper to extract the decoded instruction data type from your ABI for better TypeScript type safety. See the [Types & Methods reference](/en/sdk/pipes-sdk/solana/reference/types-methods#abidecodeinstruction) for details.
+</Tip>
+
+## Decoded Instruction Structure
+
+Each decoded instruction contains:
+
+```ts
+interface DecodedInstruction<D> {
+  instruction: D; // Decoded instruction data
+  programId: string;
+  blockNumber: number; // Slot number
+  timestamp: Date;
+  transaction: Transaction;
+  innerInstructions: Instruction[];
+  rawInstruction: Instruction;
+  tokenBalances: TokenBalance[];
+}
+```
+
+## Instruction Discriminators
+
+Instructions are filtered by discriminators (prefix bytes of instruction data). The discriminator names indicate the number of hex characters returned:
+
+| Name | Hex Characters | Bytes | Common Use |
+|------|----------------|-------|------------|
+| `d1` | 4 chars | 2 bytes | Simple programs |
+| `d2` | 8 chars | 4 bytes | Some native programs |
+| `d4` | 14 chars | 7 bytes | Custom programs |
+| `d8` | 18 chars | 9 bytes | Anchor programs (most common) |
+
+The decoder automatically extracts the appropriate discriminator from the ABI instruction definition.
+
+## Multiple Programs
+
+Decode instructions from multiple programs:
+
+```ts
+const decoder = solanaInstructionDecoder({
+  range: { from: 200000000 },
+  programId: [
+    orcaWhirlpool.programId,
+    raydiumAmm.programId,
+  ],
+  instructions: {
+    orcaSwap: orcaWhirlpool.instructions.swap,
+    raydiumSwap: raydiumAmm.instructions.swapBaseIn,
+  },
+});
+```
+
+## Error Handling
+
+Handle decoding errors:
+
+```ts
+const decoder = solanaInstructionDecoder({
+  range: { from: 200000000 },
+  programId: programId,
+  instructions: { swap: instructions.swap },
+  onError: (ctx, error) => {
+    ctx.logger.warn(`Failed to decode instruction: ${error.message}`);
+    // Return null to skip this instruction, or throw to stop processing
+    return null;
+  },
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Query Builder"
+    icon="arrow-left"
+    href="/en/sdk/pipes-sdk/solana/reference/query-builder"
+  >
+    Query builder API
+  </Card>
+
+  <Card
+    title="Transformers & Targets"
+    icon="arrow-right"
+    href="/en/sdk/pipes-sdk/solana/reference/transformers-targets"
+  >
+    Transformers and targets
+  </Card>
+</CardGroup>
+

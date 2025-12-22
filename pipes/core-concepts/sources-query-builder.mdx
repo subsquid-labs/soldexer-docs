@@ -1,0 +1,263 @@
+---
+title: "Sources & Query Builder"
+description: "Configure Solana data sources and build queries"
+---
+
+## Portal Source
+
+The `solanaPortalSource` function creates a data source that streams Solana blockchain data from the Subsquid Portal API.
+
+```ts
+import { solanaPortalSource, SolanaQueryBuilder } from '@subsquid/pipes/solana'
+
+const source = solanaPortalSource({
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+  query: new SolanaQueryBuilder(),
+})
+```
+
+### Configuration Options
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `portal` | `string \| PortalClientOptions` | Yes | Portal URL or configuration object |
+| `query` | `SolanaQueryBuilder \| PortalRange` | No | Query builder instance or range |
+| `cursor` | `{ number: number }` | No | Resume from a specific slot |
+| `cache` | `PortalCache` | No | Caching adapter |
+| `logger` | `Logger \| LogLevel` | No | Custom Pino-compatible logger or level |
+| `metrics` | `MetricsServer` | No | Metrics server for monitoring |
+| `progress` | `ProgressTrackerOptions` | No | Progress tracking configuration |
+
+### Portal Configuration
+
+You can pass a URL string or a configuration object:
+
+```ts
+// Simple URL
+const source = solanaPortalSource({
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+  query: queryBuilder,
+})
+
+// With finalized blocks only
+const source = solanaPortalSource({
+  portal: {
+    url: 'https://portal.sqd.dev/datasets/solana-mainnet',
+    finalized: true,
+  },
+  query: queryBuilder,
+})
+```
+
+## SolanaQueryBuilder
+
+The `SolanaQueryBuilder` class builds queries for the Portal API. All methods are additive and can be chained.
+
+### Field Selection
+
+Use `addFields()` to specify which fields to include in the response:
+
+```ts
+const queryBuilder = new SolanaQueryBuilder()
+  .addFields({
+    block: {
+      slot: true,
+      hash: true,
+      parentNumber: true,
+      parentHash: true,
+      timestamp: true,
+    },
+    instruction: {
+      programId: true,
+      data: true,
+      accounts: true,
+      transactionHash: true,
+    },
+    transaction: {
+      signatures: true,
+      fee: true,
+    },
+  })
+```
+
+<Note>
+Block `slot` and `hash` fields are always required and automatically included.
+</Note>
+
+### Data Requests
+
+Add specific data requests to filter what data is fetched:
+
+#### Instructions
+
+Filter instructions by program ID and discriminator:
+
+```ts
+queryBuilder.addInstruction({
+  request: {
+    programId: ['whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc'],
+    d8: ['0xf8c69e91e17587c8'], // 8-byte discriminator
+  },
+  range: { from: 200000000, to: 210000000 },
+})
+```
+
+Discriminator types:
+- `d1` - 1-byte discriminator
+- `d2` - 2-byte discriminator
+- `d4` - 4-byte discriminator
+- `d8` - 8-byte discriminator (most common for Anchor programs)
+
+#### Transactions
+
+Filter transactions:
+
+```ts
+queryBuilder.addTransaction({
+  request: {
+    feePayer: ['...'], // Filter by fee payer
+  },
+  range: { from: 200000000 },
+})
+```
+
+#### Logs
+
+Filter program logs:
+
+```ts
+queryBuilder.addLog({
+  request: {
+    programId: ['...'],
+  },
+  range: { from: 200000000 },
+})
+```
+
+#### Balances
+
+Track SOL balance changes:
+
+```ts
+queryBuilder.addBalance({
+  request: {
+    account: ['...'],
+  },
+  range: { from: 200000000 },
+})
+```
+
+#### Token Balances
+
+Track SPL token balance changes:
+
+```ts
+queryBuilder.addTokenBalance({
+  request: {
+    account: ['...'],
+    preMint: ['...'],   // Filter by mint before transaction
+    postMint: ['...'],  // Filter by mint after transaction
+  },
+  range: { from: 200000000 },
+})
+```
+
+#### Rewards
+
+Track staking rewards:
+
+```ts
+queryBuilder.addReward({
+  request: {
+    pubkey: ['...'],
+  },
+  range: { from: 200000000 },
+})
+```
+
+### Include All Blocks
+
+Include blocks even if they don't match any filters:
+
+```ts
+queryBuilder.includeAllBlocks({ from: 200000000 })
+```
+
+### Range Specification
+
+Ranges can be specified as:
+
+```ts
+// From a specific slot
+{ from: 200000000 }
+
+// Bounded range
+{ from: 200000000, to: 210000000 }
+
+// From latest (real-time)
+{ from: 'latest' }
+```
+
+## Complete Example
+
+```ts
+import { solanaPortalSource, SolanaQueryBuilder } from '@subsquid/pipes/solana'
+import { createTarget } from '@subsquid/pipes'
+
+const queryBuilder = new SolanaQueryBuilder()
+  .addFields({
+    block: { slot: true, hash: true, timestamp: true },
+    instruction: {
+      programId: true,
+      data: true,
+      accounts: true,
+      transactionHash: true,
+    },
+  })
+  .addInstruction({
+    request: {
+      programId: ['whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc'],
+      d8: ['0xf8c69e91e17587c8'],
+    },
+    range: { from: 200000000 },
+  })
+
+const source = solanaPortalSource({
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+  query: queryBuilder,
+})
+
+const target = createTarget({
+  write: async ({ logger, read }) => {
+    for await (const { data } of read()) {
+      logger.info(`Received ${data.blocks.length} blocks`)
+    }
+  },
+})
+
+await source.pipeTo(target)
+```
+
+## Query from Transformers
+
+Transformers can contribute to the query dynamically:
+
+```ts
+import { createTransformer } from '@subsquid/pipes'
+
+const transformer = createTransformer({
+  query: ({ queryBuilder }) => {
+    queryBuilder
+      .addFields({ instruction: { programId: true, data: true } })
+      .addInstruction({
+        request: { programId: ['...'] },
+        range: { from: 200000000 },
+      })
+  },
+  transform: async (data) => {
+    return data.blocks.flatMap(b => b.instructions)
+  },
+})
+```
+
+This allows self-contained transformers that specify their own data requirements.

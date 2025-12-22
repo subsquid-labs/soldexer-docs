@@ -1,0 +1,240 @@
+---
+title: "Types & Pipe Methods"
+description: "API reference for types and pipe methods"
+---
+
+## Types
+
+### DecodedInstruction
+
+```ts
+interface DecodedInstruction<D> {
+  instruction: D; // Decoded instruction data
+  programId: string;
+  blockNumber: number; // Slot number
+  timestamp: Date;
+  transaction: Transaction;
+  innerInstructions: Instruction[];
+  rawInstruction: Instruction;
+  tokenBalances: TokenBalance[];
+}
+```
+
+### AbiDecodeInstruction
+
+Type helper for extracting decoded instruction data type from an ABI instruction.
+
+```ts
+import type { AbiDecodeInstruction } from "@subsquid/pipes/solana";
+import { jupiterAbi } from "./abi/jupiter";
+
+// Extract the decoded instruction type
+type SwapInstruction = AbiDecodeInstruction<typeof jupiterAbi.instructions.swap>;
+
+// Use in your code
+const decoder = solanaInstructionDecoder({
+  range: { from: 250000000 },
+  programId: jupiterAbi.programId,
+  instructions: {
+    swap: jupiterAbi.instructions.swap,
+  },
+});
+
+// TypeScript will infer the correct type
+for await (const { data } of source.pipe(decoder)) {
+  data.swap; // AbiDecodeInstruction<typeof jupiterAbi.instructions.swap>[]
+}
+```
+
+<Note>
+`AbiDecodeInstruction` is a type helper that extracts the decoded instruction data type from an ABI instruction definition. This provides type safety when working with decoded Solana instructions.
+</Note>
+
+### SolanaPortalData
+
+Data returned from the Portal source. The structure contains blocks with fields based on your query selection.
+
+```ts
+type SolanaPortalData<F extends FieldSelection> = {
+  blocks: solana.Block<F>[];
+}
+```
+
+### SolanaTransformer
+
+Type for transformers operating on Solana data.
+
+```ts
+type SolanaTransformer<In, Out> = Transformer<In, Out, SolanaQueryBuilder>
+```
+
+### EventResponse
+
+Response type from `solanaInstructionDecoder`. Maps instruction names to arrays of decoded instructions.
+
+```ts
+type EventResponse<T extends Instructions> = {
+  [K in keyof T]: AbiDecodeInstruction<T[K]>[]
+}
+```
+
+### Instructions
+
+Type for the instructions configuration object.
+
+```ts
+type Instructions = Record<string, AbiInstruction<any, any>>
+```
+
+### Context
+
+```ts
+interface Context {
+  logger: Logger;
+  profiler: Profiler;
+}
+```
+
+### Logger
+
+The logger interface is Pino-compatible, allowing integration with any Pino transport for sending logs to external services like GCP Cloud Logging, Sentry, or other monitoring platforms.
+
+```ts
+interface Logger {
+  info(message: string | object, ...args: any[]): void;
+  warn(message: string | object, ...args: any[]): void;
+  error(message: string | object, ...args: any[]): void;
+}
+```
+
+<Note>
+You can use the logger as a drop-in replacement for standard Pino loggers. See the [Custom Logging](/en/sdk/pipes-sdk/solana/advanced/quality-of-life#custom-logging) section for integration examples.
+</Note>
+
+### Profiler
+
+```ts
+interface Profiler {
+  start(name: string): Profiler;
+  measure<T>(name: string, fn: (span: Profiler) => Promise<T>): Promise<T>;
+  addLabels(labels: string | string[]): Profiler;
+  end(): Profiler;
+  elapsed: number;
+  children: Profiler[];
+}
+```
+
+### BlockCursor
+
+```ts
+interface BlockCursor {
+  number: number;  // Slot number for Solana
+  hash?: string;
+  timestamp?: number;
+}
+```
+
+## Pipe Methods
+
+### pipe
+
+Chain a transformer.
+
+```ts
+source.pipe(transformer);
+```
+
+### pipeComposite
+
+Chain multiple transformers.
+
+```ts
+source.pipeComposite({
+  orcaSwaps: transformer1,
+  raydiumSwaps: transformer2,
+});
+```
+
+### pipeTo
+
+Connect to a target.
+
+```ts
+source.pipeTo(target);
+```
+
+<Note>
+`pipeTo` is a terminal step. You cannot continue piping after calling this method.
+</Note>
+
+## Discriminator Helpers
+
+Low-level functions for extracting instruction discriminators. These are used internally by the decoder but exported for advanced use cases.
+
+```ts
+import {
+  getInstructionD1,
+  getInstructionD2,
+  getInstructionD4,
+  getInstructionD8,
+  D0_SYM,
+  D1_SYM,
+  D2_SYM,
+  D4_SYM,
+} from "@subsquid/pipes/solana";
+```
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `getInstructionD1(instruction)` | 4 hex chars (2 bytes) | Extract 1-byte discriminator |
+| `getInstructionD2(instruction)` | 8 hex chars (4 bytes) | Extract 2-byte discriminator |
+| `getInstructionD4(instruction)` | 14 hex chars (7 bytes) | Extract 4-byte discriminator |
+| `getInstructionD8(instruction)` | 18 hex chars (9 bytes) | Extract 8-byte discriminator |
+
+## Complete Type Example
+
+```ts
+import type {
+  Source,
+  Transformer,
+  Target,
+  Context,
+  BlockCursor,
+} from "@subsquid/pipes";
+
+import type {
+  SolanaPortalData,
+  SolanaQueryBuilder,
+  SolanaTransformer,
+  DecodedInstruction,
+  AbiDecodeInstruction,
+  EventResponse,
+  Instructions,
+} from "@subsquid/pipes/solana";
+
+import type {
+  ClickhouseTargetConfig,
+  Store,
+} from "@subsquid/pipes/targets/clickhouse";
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Sources"
+    icon="arrow-left"
+    href="/en/sdk/pipes-sdk/solana/reference/sources"
+  >
+    Sources
+  </Card>
+
+  <Card
+    title="Query Builder"
+    icon="filter"
+    href="/en/sdk/pipes-sdk/solana/reference/query-builder"
+  >
+    Query builder API
+  </Card>
+</CardGroup>
+
