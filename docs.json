@@ -26,12 +26,61 @@
             ]
           },
           {
-            "group": "Pipes",
+            "group": "Pipes SDK",
             "pages": [
-              "pipes/overview",
-              "pipes/example-1-dex-swaps",
-              "pipes/example-2-metaplex-nft-metadata",
-              "pipes/example-3-pumpfun-tokens"
+              "pipes/quickstart",
+              "pipes/introduction",
+              {
+                "group": "Guides",
+                "pages": [
+                  "pipes/guides/getting-started",
+                  "pipes/guides/event-decoding",
+                  "pipes/guides/data-persistence",
+                  "pipes/guides/factory-pattern"
+                ]
+              },
+              {
+                "group": "Core Concepts",
+                "pages": [
+                  "pipes/core-concepts/overview",
+                  "pipes/core-concepts/sources-query-builder",
+                  "pipes/core-concepts/decoders",
+                  "pipes/core-concepts/transformers",
+                  "pipes/core-concepts/targets-persistence"
+                ]
+              },
+              {
+                "group": "Advanced",
+                "pages": [
+                  "pipes/advanced/quality-of-life",
+                  "pipes/advanced/stateful-indexing"
+                ]
+              },
+              {
+                "group": "Database Integration",
+                "pages": [
+                  "pipes/integration-advanced/clickhouse",
+                  "pipes/integration-advanced/postgres-drizzle"
+                ]
+              },
+              {
+                "group": "AI",
+                "pages": [
+                  "pipes/ai/cursor-rules"
+                ]
+              },
+              {
+                "group": "Reference",
+                "pages": [
+                  "pipes/reference/api-reference",
+                  "pipes/reference/sources",
+                  "pipes/reference/transformers",
+                  "pipes/reference/targets",
+                  "pipes/reference/query-builder",
+                  "pipes/reference/factories-utilities",
+                  "pipes/reference/pipe-ui"
+                ]
+              }
             ]
           },
           {
