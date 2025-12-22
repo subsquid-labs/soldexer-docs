@@ -1,0 +1,29 @@
+---
+title: "Intro"
+description: "The all-in-one solution for indexing Solana"
+---
+
+Aside from [pipes](/pipes/overview) you can also use [Squid SDK](https://docs.sqd.ai/sdk/) to access [Soldexer API](/api-reference/introduction). Here are some features bundled in the Squid SDK:
+
+ - interfacing the [Soldexer API](/api-reference/introduction)
+ - writing to a variety of data sinks (Postgres, BigQuery, Parquet/CSV/JSON/JSONL local or S3 files)
+ - proper handling of real-time data, including rollbacks due to orphan blocks (only with Postgres)
+ - fast instruction decoding based on JSON IDLs (made with Anchor or Shank)
+ - an option to serve a GraphQL API using PostGraphile, Hasura or a native SQD GraphQL server
+ - an option to deploy to [SQD Cloud](https://app.subsquid.io) trusted by 100+ partners
+
+If that's something you'd like, then this section might be for you.
+
+## Squid SDK indexers' architecture
+
+Before you jump into action it's best to know a few key facts:
+
+0. In Squid SDK the indexers are called **squids**.
+1. The main component of any squid is its **processor** - a NodeJS process that ingests data from Soldexer or another compatible API, transforms it and stores it to a data sync.
+2. Processor fetches and processes data **in batches** of variable size. Each batch contains data for a range of blocks. The size of this range can be anywhere from one to several thousands of blocks. It is automatically determined by the SDK.
+3. When it's done processing a batch of data, the processor will send the results to one of its supported data sinks. All such write operations are normally **atomic / transactional**, meaning that if you terminate the indexer in the middle of processing a batch then all code executed on that batch up to that point will have no effect on the data sink.
+4. This allows squids to be stopped and restarted at any point without any fear of data corruption. Crashes won't corrupt data, either.
+5. When consuming real-time data, the processor will occasionally encounter orphan blocks. When that happens it'll use a log of recent DB operations to roll back any changes to the database state made due to orphan blocks, then restart data processing from the latest known consensus block. All of this happens automatically, with the end result being that the database changes its state to the correct one. If you're simply sending the data to your app's frontend it's usually nothing to be worried about, but you have to plan for that if you're archiving the data with some external tools or are using it in decision making.
+6. Consistency guarantees mentioned in pp. 3-5 come with some fine print: you have to use Squid SDK's built-in tools to access your data sink, or your warranty is void. Since squid processors are regular NodeJS apps you can make any calls to external libraries and/or APIs, including writes to arbitrary data sinks. However, you'll have to manage the consistency of any such writes on your own.
+
+Now that you know the basics let's take a look at an actual squid processor!
