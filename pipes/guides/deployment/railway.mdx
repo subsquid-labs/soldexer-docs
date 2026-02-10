@@ -1,0 +1,661 @@
+---
+title: "Deploy Pipes to Railway"
+description: "Production-ready guide for deploying a Pipes-based indexer to Railway"
+---
+
+<Info>
+This guide is a placeholder. The actual guide is TBA.
+</Info>
+
+Deploy a production-ready Pipe to Railway with persistent cursor management. This guide demonstrates deploying a USDC transfer indexer using Railway's platform.
+
+## Overview
+
+Railway provides a simple platform for deploying Node.js applications with built-in support for persistent storage, environment variables, and monitoring. This guide shows a complete production setup including:
+
+- Cursor persistence for resumable indexing
+- Proper error handling and logging
+- Rollback handlers for blockchain reorganizations
+- File-based data storage
+- Automated Railway deployment
+
+<Info>
+While SST supports Railway through the [Railway Terraform provider](https://registry.terraform.io/providers/terraform-community-providers/railway/latest), this guide uses Railway's native deployment methods which are simpler and better documented for Node.js applications.
+</Info>
+
+## Prerequisites
+
+Before starting, ensure you have:
+
+- A [Railway account](https://railway.app)
+- Node.js 22+ installed
+- Git for version control
+- GitHub account (for deployment option 1)
+
+## Complete Example Pipe
+
+Here's a production-ready Pipe that indexes USDC transfers with cursor persistence:
+
+<CodeGroup>
+
+```ts src/index.ts
+import { createTarget } from "@subsquid/pipes";
+import {
+  evmPortalSource,
+  evmDecoder,
+  commonAbis,
+} from "@subsquid/pipes/evm";
+import fs from "fs/promises";
+import path from "path";
+
+const CURSOR_FILE = process.env.CURSOR_FILE || "cursor.json";
+const DATA_DIR = process.env.DATA_DIR || "data";
+
+async function loadCursor(): Promise<number | null> {
+  try {
+    const data = await fs.readFile(CURSOR_FILE, "utf-8");
+    const { blockNumber } = JSON.parse(data);
+    console.log(`Resuming from block ${blockNumber}`);
+    return blockNumber;
+  } catch {
+    console.log("No cursor found, starting from configured block");
+    return null;
+  }
+}
+
+async function saveCursor(blockNumber: number): Promise<void> {
+  await fs.writeFile(
+    CURSOR_FILE,
+    JSON.stringify({ blockNumber, timestamp: new Date().toISOString() }, null, 2)
+  );
+}
+
+async function saveData(filename: string, data: object[]): Promise<void> {
+  const filepath = path.join(DATA_DIR, filename);
+  await fs.writeFile(filepath, JSON.stringify(data, null, 2));
+}
+
+async function main() {
+  // Ensure data directory exists
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  
+  const savedCursor = await loadCursor();
+  
+  console.log("Starting USDC transfer indexer...");
+  console.log(`Portal: ${process.env.PORTAL_URL || "default"}`);
+
+  const source = evmPortalSource({
+    portal: process.env.PORTAL_URL || "https://portal.sqd.dev/datasets/ethereum-mainnet",
+  });
+
+  const decoder = evmDecoder({
+    range: {
+      from: savedCursor ?? 17000000,
+    },
+    contracts: ["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"], // USDC
+    events: {
+      transfer: commonAbis.erc20.events.Transfer,
+    },
+  });
+
+  const target = createTarget({
+    write: async ({ logger, read }) => {
+      for await (const { data } of read(
+        savedCursor ? { number: savedCursor } : undefined
+      )) {
+        try {
+          // Extract and format transfer data
+          const transfers = data.transfer.map((t) => ({
+            blockNumber: t.block.number,
+            blockHash: t.block.hash,
+            timestamp: t.block.timestamp,
+            transactionHash: t.rawEvent.transactionHash,
+            logIndex: t.rawEvent.logIndex,
+            from: t.event.from,
+            to: t.event.to,
+            value: t.event.value.toString(),
+          }));
+
+          // Save batch to file
+          const filename = `transfers-${Date.now()}.json`;
+          await saveData(filename, transfers);
+
+          // Update cursor
+          const lastBlock = Math.max(
+            ...data.transfer.map((t) => t.block.number)
+          );
+          await saveCursor(lastBlock);
+
+          logger.info(
+            `Processed ${transfers.length} transfers up to block ${lastBlock}`
+          );
+        } catch (error) {
+          logger.error({ error }, "Error processing batch");
+          throw error;
+        }
+      }
+    },
+  });
+
+  await source.pipe(decoder).pipeTo(target);
+}
+
+main().catch((error) => {
+  console.error("Fatal error:", error);
+  process.exit(1);
+});
+```
+
+```json package.json
+{
+  "name": "usdc-indexer-railway",
+  "version": "1.0.0",
+  "description": "USDC transfer indexer deployed to Railway",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@subsquid/pipes": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "tsx": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
+```
+
+```json tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "lib": ["ES2020"],
+    "moduleResolution": "node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "declarationMap": true,
+    "outDir": "./dist",
+    "rootDir": "./src"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
+```
+
+</CodeGroup>
+
+<Warning>
+**Cursor File Persistence**: Railway services use ephemeral storage by default. Use Railway's [persistent volumes](https://docs.railway.app/reference/volumes) to ensure cursor data survives restarts. Without persistent storage, your indexer will restart from the beginning after each deployment.
+</Warning>
+
+## Dockerfile
+
+Create a Dockerfile for Railway deployment:
+
+```dockerfile Dockerfile
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+COPY tsconfig.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy source code
+COPY src ./src
+
+# Build TypeScript
+RUN npm run build
+
+# Production stage
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install production dependencies only
+RUN npm ci --production
+
+# Copy built application
+COPY --from=builder /app/dist ./dist
+
+# Create data directory
+RUN mkdir -p /app/data
+
+# Set environment variables
+ENV NODE_ENV=production
+ENV CURSOR_FILE=/app/cursor.json
+ENV DATA_DIR=/app/data
+
+# Run the application
+CMD ["node", "dist/index.js"]
+```
+
+## Deployment Options
+
+Choose your preferred deployment method:
+
+<Tabs>
+<Tab title="GitHub Integration (Recommended)">
+
+Deploy automatically from your GitHub repository:
+
+<Steps>
+<Step title="Push code to GitHub">
+
+Initialize Git and push your code:
+
+```bash
+git init
+git add .
+git commit -m "Initial commit: USDC indexer"
+git branch -M main
+git remote add origin https://github.com/yourusername/usdc-indexer.git
+git push -u origin main
+```
+
+</Step>
+
+<Step title="Create Railway project">
+
+1. Log in to [Railway Dashboard](https://railway.app)
+2. Click **New Project**
+3. Select **Deploy from GitHub repo**
+4. Choose your repository
+5. Railway will automatically detect the Dockerfile and deploy
+
+</Step>
+
+<Step title="Configure environment variables">
+
+In the Railway dashboard:
+
+1. Go to your service's **Variables** tab
+2. Add environment variables:
+
+```bash
+PORTAL_URL=https://portal.sqd.dev/datasets/ethereum-mainnet
+NODE_ENV=production
+```
+
+</Step>
+
+<Step title="Set up persistent volume">
+
+To persist cursor data across deployments:
+
+1. Go to your service's **Settings** tab
+2. Scroll to **Volumes**
+3. Click **Add Volume**
+4. Set mount path: `/app/data`
+5. This ensures cursor.json persists across restarts
+
+<Check>
+Your indexer will now automatically deploy on every push to main branch.
+</Check>
+
+</Step>
+
+</Steps>
+
+</Tab>
+
+<Tab title="Railway CLI">
+
+Deploy directly using the Railway CLI:
+
+<Steps>
+<Step title="Install Railway CLI">
+
+<CodeGroup>
+
+```bash npm
+npm install -g @railway/cli
+```
+
+```bash brew
+brew install railway
+```
+
+```bash curl
+sh -c "$(curl -sSL https://raw.githubusercontent.com/railwayapp/cli/master/install.sh)"
+```
+
+</CodeGroup>
+
+</Step>
+
+<Step title="Login to Railway">
+
+```bash
+railway login
+```
+
+This opens a browser window for authentication.
+
+</Step>
+
+<Step title="Initialize project">
+
+```bash
+railway init
+```
+
+Select **Create new project** and give it a name.
+
+</Step>
+
+<Step title="Link to project">
+
+```bash
+railway link
+```
+
+Select your project from the list.
+
+</Step>
+
+<Step title="Set environment variables">
+
+```bash
+railway variables set PORTAL_URL=https://portal.sqd.dev/datasets/ethereum-mainnet
+railway variables set NODE_ENV=production
+```
+
+</Step>
+
+<Step title="Deploy">
+
+```bash
+railway up
+```
+
+Railway will build and deploy your Dockerfile.
+
+<Check>
+View logs with `railway logs` to monitor your indexer.
+</Check>
+
+</Step>
+
+</Steps>
+
+</Tab>
+</Tabs>
+
+## Verification
+
+Verify your deployment is working correctly:
+
+<Steps>
+<Step title="Check deployment status">
+
+In the Railway dashboard:
+
+1. Navigate to your project
+2. Check the **Deployments** tab
+3. Verify the latest deployment shows "Active"
+4. Click on the deployment to view build logs
+
+</Step>
+
+<Step title="View live logs">
+
+<Tabs>
+<Tab title="Railway Dashboard">
+
+1. Go to your service
+2. Click the **Logs** tab
+3. Watch for processing messages:
+
+```
+Starting USDC transfer indexer...
+Resuming from block 17500000
+Processed 42 transfers up to block 17500100
+```
+
+</Tab>
+
+<Tab title="Railway CLI">
+
+```bash
+railway logs --follow
+```
+
+</Tab>
+</Tabs>
+
+</Step>
+
+<Step title="Verify cursor progression">
+
+Check that the cursor is advancing:
+
+1. Use Railway's shell feature to access your container:
+
+```bash
+railway shell
+```
+
+2. View the cursor file:
+
+```bash
+cat cursor.json
+```
+
+You should see:
+
+```json
+{
+  "blockNumber": 17500100,
+  "timestamp": "2024-01-15T10:30:00.000Z"
+}
+```
+
+</Step>
+
+<Step title="Check data output">
+
+Verify data files are being created:
+
+```bash
+ls -la data/
+cat data/transfers-*.json | head -n 20
+```
+
+</Step>
+
+<Step title="Monitor resource usage">
+
+In the Railway dashboard:
+
+1. Go to **Metrics** tab
+2. Monitor CPU and memory usage
+3. Ensure your service stays within allocated resources
+4. Adjust service size if needed in **Settings** → **Resources**
+
+</Step>
+
+</Steps>
+
+## Production Best Practices
+
+<AccordionGroup>
+<Accordion title="Persistent Storage" icon="database">
+
+**Use Railway Volumes for cursor persistence:**
+
+```bash
+# In Railway dashboard:
+# Settings → Volumes → Add Volume
+# Mount path: /app/data
+```
+
+Update your code to store cursor in the mounted volume:
+
+```ts
+const CURSOR_FILE = "/app/data/cursor.json";
+```
+
+</Accordion>
+
+<Accordion title="Error Handling" icon="triangle-exclamation">
+
+**Implement robust error handling:**
+
+```ts
+const target = createTarget({
+  write: async ({ logger, read }) => {
+    for await (const { data } of read()) {
+      try {
+        await processData(data);
+      } catch (error) {
+        logger.error({ error, blockNumber: data.blocks[0]?.number }, "Processing failed");
+        // Decide: throw to stop, or continue to next batch
+        throw error; // Stops indexer for investigation
+      }
+    }
+  },
+});
+```
+
+</Accordion>
+
+<Accordion title="Monitoring" icon="chart-line">
+
+**Set up health checks and alerts:**
+
+1. Use Railway's built-in monitoring
+2. Add a health check endpoint (optional):
+
+```ts
+import express from "express";
+
+const app = express();
+let lastProcessedBlock = 0;
+
+app.get("/health", (req, res) => {
+  res.json({
+    status: "ok",
+    lastBlock: lastProcessedBlock,
+    uptime: process.uptime(),
+  });
+});
+
+app.listen(3000);
+```
+
+3. Configure Railway health check in **Settings** → **Health Check**
+
+</Accordion>
+
+<Accordion title="Environment Configuration" icon="gear">
+
+**Use environment-specific settings:**
+
+```ts
+const config = {
+  development: {
+    portal: "https://portal.sqd.dev/datasets/ethereum-mainnet",
+    startBlock: 20000000,
+  },
+  production: {
+    portal: "https://portal.sqd.dev/datasets/ethereum-mainnet",
+    startBlock: 17000000,
+  },
+};
+
+const env = process.env.NODE_ENV || "development";
+const settings = config[env];
+```
+
+</Accordion>
+
+<Accordion title="Graceful Shutdown" icon="power-off">
+
+**Handle shutdown signals properly:**
+
+```ts
+let isShuttingDown = false;
+
+process.on("SIGTERM", () => {
+  console.log("SIGTERM received, shutting down gracefully...");
+  isShuttingDown = true;
+});
+
+const target = createTarget({
+  write: async ({ logger, read }) => {
+    for await (const { data } of read()) {
+      if (isShuttingDown) {
+        logger.info("Shutdown requested, stopping after current batch");
+        break;
+      }
+      await processData(data);
+    }
+  },
+});
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+<Tip>
+**Testing Before Deployment**: Always test your indexer locally with `npm run dev` before deploying to Railway. Use a small block range to verify cursor persistence and data output.
+</Tip>
+
+## Troubleshooting
+
+Common issues and solutions:
+
+| Issue | Solution |
+|-------|----------|
+| **Cursor resets on restart** | Add a persistent volume in Railway settings mounted to `/app/data` |
+| **Out of memory errors** | Increase memory in Settings → Resources, or reduce batch size |
+| **Build fails** | Check Dockerfile syntax and ensure all dependencies are in package.json |
+| **No data output** | Verify PORTAL_URL is set correctly and check logs for errors |
+| **Slow indexing** | Check network latency, consider caching, optimize batch size |
+
+## Next Steps
+
+<CardGroup cols={2}>
+<Card title="Data Persistence" icon="database" href="./data-persistence">
+  Advanced patterns for cursor and state management
+</Card>
+
+<Card title="Stateful Indexing" icon="rotate" href="../stateful-indexing">
+  Handle blockchain reorganizations with rollback handlers
+</Card>
+
+<Card title="Performance" icon="gauge-high" href="./performance">
+  Optimize your indexer for high-throughput chains
+</Card>
+
+<Card title="Event Decoding" icon="code" href="./event-decoding">
+  Type-safe event decoding with generated ABIs
+</Card>
+</CardGroup>
+
+## References
+
+- [Railway Documentation](https://docs.railway.app)
+- [Railway Volumes Guide](https://docs.railway.app/reference/volumes)
+- [Pipes SDK Reference](/en/sdk/pipes-sdk/reference)
+- [Portal API Overview](/en/portal/overview)
+- [SST Documentation](https://sst.dev/)

@@ -1,0 +1,183 @@
+---
+title: "Observing and debugging with Pipes UI"
+description: "Web-based monitoring dashboard for pipeline visualization and performance metrics"
+---
+
+## Overview
+
+Pipe UI is a web-based monitoring dashboard that provides real-time visualization of your pipeline's performance, profiling data, and metrics. It connects to your pipe's Prometheus metrics endpoint to display comprehensive monitoring information.
+
+<Frame>
+  <video
+    controls
+    autoPlay
+    loop
+    muted
+    className="w-full aspect-video rounded-xl"
+    src="/videos/pipes-ui.mov"
+  ></video>
+</Frame>
+
+<Info>
+Pipe UI requires metrics to be exposed from your pipe. The pipe automatically exposes Prometheus metrics when profilers are enabled, and you need to start a metrics server to make these metrics accessible to Pipe UI.
+</Info>
+
+## Why Use Pipe UI?
+
+Pipe UI reads from your pipe's Prometheus metrics endpoint (default port 9090) to visualize:
+
+- **Pipeline performance**: Throughput, latency, and processing rates
+- **Profiling data**: Time spent in different pipeline stages
+- **Custom metrics**: Any custom metrics you've added using `ctx.metrics`
+- **Pipeline status**: Real-time health and status information
+
+This visualization helps you identify bottlenecks, monitor performance, and debug issues in your data processing pipeline.
+
+## Running Pipe UI
+
+Pipe UI is designed to be run directly without installation. To start the monitoring dashboard, use:
+
+```bash
+npx @sqd-pipes/pipe-ui@latest --open
+```
+
+This command launches the Pipe UI dashboard and automatically opens it in your browser.
+
+## Setup
+
+<Steps>
+<Step title="Enable profilers in your pipeline">
+  Add profiler configuration to your decoders and transformers. Profilers automatically expose metrics that Pipe UI can visualize.
+
+```ts
+import { evmDecoder, evmPortalSource } from "@subsquid/pipes/evm";
+import { commonAbis } from "@subsquid/pipes/evm";
+
+const decoder = evmDecoder({
+  profiler: { id: "transfer-decoder" },
+  range: { from: 20000000 },
+  contracts: ["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"],
+  events: {
+    transfer: commonAbis.erc20.events.Transfer,
+  },
+});
+```
+
+<Check>
+Profilers are automatically enabled when you provide a `profiler` configuration. No additional setup is required.
+</Check>
+</Step>
+
+<Step title="Start the metrics server">
+  Add a metrics server to your source to expose Prometheus metrics from your pipe.
+
+```ts
+import { metricsServer } from "@subsquid/pipes/metrics/node";
+import { evmPortalSource } from "@subsquid/pipes/evm";
+
+async function main() {
+  const source = evmPortalSource({
+    portal: "https://portal.sqd.dev/datasets/ethereum-mainnet",
+    metrics: metricsServer({ port: 9090 }),
+  });
+}
+
+void main();
+```
+
+<Info>
+Metrics are automatically collected from profilers when the metrics server is running. Access the raw metrics at `http://localhost:9090/metrics`.
+</Info>
+</Step>
+
+<Step title="Start Pipe UI">
+  Start the Pipe UI dashboard to visualize your pipeline metrics.
+
+```bash
+npx @sqd-pipes/pipe-ui@latest --open
+```
+
+<Check>
+The dashboard will automatically open in your browser and connect to your pipe's metrics endpoint to display real-time metrics, profiling data, and pipeline status.
+</Check>
+</Step>
+</Steps>
+
+## Complete Example
+
+Here's a complete example showing how to set up a pipeline with metrics server:
+
+```ts
+import { metricsServer } from "@subsquid/pipes/metrics/node";
+import { evmDecoder, evmPortalSource, commonAbis } from "@subsquid/pipes/evm";
+import { portalSqliteCache } from "@subsquid/pipes/portal-cache/node";
+
+async function main() {
+  // Create stream with metrics server and cache
+  const stream = evmPortalSource({
+    portal: "https://portal.sqd.dev/datasets/ethereum-mainnet",
+    metrics: metricsServer({ port: 9090 }),
+    cache: {
+      adapter: await portalSqliteCache({ path: "./cache.sqlite" }),
+    },
+  }).pipe(
+    evmDecoder({
+      profiler: { id: "ERC20-transfers" },
+      range: { from: 20000000 },
+      contracts: ["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"],
+      events: {
+        transfer: commonAbis.erc20.events.Transfer,
+      },
+    })
+  );
+
+  // Process stream
+  for await (const { data, ctx } of stream) {
+    const span = ctx.profiler.start("processing");
+    // Process data...
+    console.log(`Processed ${data.transfer.length} transfers`);
+    span.end();
+  }
+}
+
+void main();
+```
+
+Once your pipeline is running with the metrics server, start Pipe UI in a separate terminal:
+
+```bash
+npx @sqd-pipes/pipe-ui@latest --open
+```
+
+The dashboard will connect to your metrics endpoint at `http://localhost:9090/metrics` and display real-time visualization of your pipeline's performance.
+
+## Custom Metrics
+
+You can add custom metrics that will appear in Pipe UI:
+
+```ts
+async function main() {
+  const stream = evmPortalSource({
+    portal: "https://portal.sqd.dev/datasets/ethereum-mainnet",
+    metrics: metricsServer({ port: 9090 }),
+  }).pipe(decoder);
+
+  for await (const { data, ctx } of stream) {
+    // Add custom counter metric
+    ctx.metrics
+      .counter({ name: "transfers_processed", help: "Number of transfers processed" })
+      .inc(data.transfer.length);
+
+    // Add custom gauge metric
+    ctx.metrics
+      .gauge({ name: "current_block", help: "Current block number" })
+      .set(data.transfer[0]?.block.number || 0);
+  }
+}
+
+void main();
+```
+
+<Info>
+Custom metrics are automatically exposed through the metrics server and will appear in Pipe UI alongside profiler metrics.
+</Info>
