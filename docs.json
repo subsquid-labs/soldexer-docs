@@ -29,56 +29,62 @@
             "group": "Pipes SDK",
             "pages": [
               "pipes/quickstart",
-              "pipes/introduction",
+              "pipes/why-pipes-sdk",
+              "pipes/prod-ready-pipe",
               {
                 "group": "Guides",
                 "pages": [
-                  "pipes/guides/getting-started",
-                  "pipes/guides/instruction-decoding",
-                  "pipes/guides/dex-swaps",
-                  "pipes/guides/data-persistence"
-                ]
-              },
-              {
-                "group": "Core Concepts",
-                "pages": [
-                  "pipes/core-concepts/overview",
-                  "pipes/core-concepts/sources-query-builder",
-                  "pipes/core-concepts/decoders",
-                  "pipes/core-concepts/transformers",
-                  "pipes/core-concepts/targets-persistence"
-                ]
-              },
-              {
-                "group": "Advanced",
-                "pages": [
-                  "pipes/advanced/quality-of-life",
-                  "pipes/advanced/latency-monitoring"
-                ]
-              },
-              {
-                "group": "Database Integration",
-                "pages": [
-                  "pipes/integration-advanced/stateful-indexing"
-                ]
-              },
-              {
-                "group": "AI",
-                "pages": [
-                  "pipes/ai/cursor-rules"
+                  "pipes/guides/observing-debugging-pipes-ui",
+                  "pipes/guides/adding-custom-transformer",
+                  "pipes/guides/factory-transformers",
+                  "pipes/guides/best-practices",
+                  {
+                    "group": "Customizing",
+                    "pages": [
+                      "pipes/guides/customizing/logging",
+                      "pipes/guides/customizing/metrics",
+                      "pipes/guides/customizing/latency-monitoring"
+                    ]
+                  },
+                  {
+                    "group": "Architecture deep dives",
+                    "pages": [
+                      "pipes/guides/architecture-deep-dives/trivial-pipe",
+                      "pipes/guides/architecture-deep-dives/cursor-management",
+                      "pipes/guides/architecture-deep-dives/fork-handling"
+                    ]
+                  }
                 ]
               },
               {
                 "group": "Reference",
                 "pages": [
-                  "pipes/reference/api-reference",
-                  "pipes/reference/sources",
+                  {
+                    "group": "Basic components",
+                    "pages": [
+                      "pipes/reference/basic-components/source",
+                      "pipes/reference/basic-components/transformer",
+                      "pipes/reference/basic-components/target"
+                    ]
+                  },
                   "pipes/reference/query-builder",
-                  "pipes/reference/instruction-decoder",
-                  "pipes/reference/transformers",
-                  "pipes/reference/targets",
-                  "pipes/reference/rpc-latency-watcher",
-                  "pipes/reference/types-methods"
+                  {
+                    "group": "Utility components",
+                    "pages": [
+                      "pipes/reference/utility-components/evm-decoder",
+                      "pipes/reference/utility-components/factory",
+                      "pipes/reference/utility-components/sqlite-cache",
+                      "pipes/reference/utility-components/metrics-server",
+                      "pipes/reference/utility-components/evm-rpc-latency-watcher"
+                    ]
+                  },
+                  {
+                    "group": "Targets",
+                    "pages": [
+                      "pipes/reference/targets/clickhouse",
+                      "pipes/reference/targets/postgres-drizzle"
+                    ]
+                  }
                 ]
               }
             ]
