@@ -36,6 +36,7 @@
                 "pages": [
                   "pipes/guides/observing-debugging-pipes-ui",
                   "pipes/guides/adding-custom-transformer",
+                  "pipes/guides/basic-mode",
                   "pipes/guides/best-practices",
                   {
                     "group": "Customizing",
