@@ -36,7 +36,6 @@
                 "pages": [
                   "pipes/guides/observing-debugging-pipes-ui",
                   "pipes/guides/adding-custom-transformer",
-                  "pipes/guides/factory-transformers",
                   "pipes/guides/best-practices",
                   {
                     "group": "Customizing",
@@ -71,11 +70,10 @@
                   {
                     "group": "Utility components",
                     "pages": [
-                      "pipes/reference/utility-components/evm-decoder",
-                      "pipes/reference/utility-components/factory",
+                      "pipes/reference/utility-components/instruction-decoder",
                       "pipes/reference/utility-components/sqlite-cache",
                       "pipes/reference/utility-components/metrics-server",
-                      "pipes/reference/utility-components/evm-rpc-latency-watcher"
+                      "pipes/reference/utility-components/rpc-latency-watcher"
                     ]
                   },
                   {
