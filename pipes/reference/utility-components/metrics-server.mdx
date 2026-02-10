@@ -1,0 +1,28 @@
+---
+title: "metricsServer"
+description: "Expose Prometheus metrics from your pipe"
+---
+
+## metricsServer
+
+Start a Prometheus metrics server so Pipe UI and other tools can scrape pipeline metrics.
+
+```ts
+import { metricsServer } from "@subsquid/pipes/metrics/node";
+import { evmPortalSource } from "@subsquid/pipes/evm";
+
+const source = evmPortalSource({
+  portal: "https://portal.sqd.dev/datasets/ethereum-mainnet",
+  metrics: metricsServer({ port: 9090 }),
+});
+```
+
+**Parameters:**
+
+- `port`: HTTP port for the metrics endpoint (default: 9090)
+
+Metrics are available at `http://localhost:9090/metrics`. When profilers are enabled on decoders or transformers, their metrics are automatically exposed. You can also add custom metrics via `ctx.metrics` in your pipeline.
+
+<Info>
+Use with [Pipe UI](/en/sdk/pipes-sdk/guides/observing-debugging-pipes-ui) for a visual dashboard.
+</Info>

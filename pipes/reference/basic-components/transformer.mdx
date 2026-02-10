@@ -1,0 +1,33 @@
+---
+title: "Transformer"
+description: "API reference for createTransformer and pipe transforms"
+---
+
+## createTransformer
+
+Transform data in pipes.
+
+```ts
+createTransformer<I, O>(config: TransformerConfig<I, O>): Transformer<I, O>
+```
+
+**Parameters:**
+
+- `transform`: Transform function `async (data: I, ctx) => O` (required)
+- `query`: Query callback `({queryBuilder, portal, logger}) => void` (optional)
+
+**Example:**
+
+```ts
+const transformer = createTransformer({
+  query: ({ queryBuilder }) => {
+    queryBuilder.addInstruction({
+      request: { programId: ["whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"] },
+      range: { from: 200000000 },
+    });
+  },
+  transform: async (data) => {
+    return data.blocks.map((b) => b.instructions);
+  },
+});
+```

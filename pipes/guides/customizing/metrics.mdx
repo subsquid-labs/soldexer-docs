@@ -1,0 +1,56 @@
+---
+title: "Metrics"
+description: "Track custom metrics in Solana pipes"
+---
+
+Track custom performance metrics in your Solana pipeline.
+
+```ts
+const metrics = {
+  slotsProcessed: 0,
+  instructionsDecoded: 0,
+  startTime: Date.now(),
+};
+
+const target = createTarget({
+  write: async ({ read }) => {
+    for await (const { data } of read()) {
+      const span = profiler.start("processing");
+
+      metrics.slotsProcessed += data.blocks?.length || 0;
+      metrics.instructionsDecoded += data.swap?.length || 0;
+
+      await processData(data);
+
+      span.end();
+
+      // Log metrics
+      if (metrics.slotsProcessed % 100 === 0) {
+        const elapsed = (Date.now() - metrics.startTime) / 1000;
+        const sps = metrics.slotsProcessed / elapsed;
+        console.log({
+          slots: metrics.slotsProcessed,
+          instructions: metrics.instructionsDecoded,
+          slotsPerSec: sps.toFixed(2),
+        });
+      }
+    }
+  },
+});
+```
+
+## Profiler Usage
+
+```ts
+write: async ({ read }) => {
+  for await (const { data } of read()) {
+    const decodeSpan = profiler.start("decode");
+    const decoded = decodeInstructions(data);
+    decodeSpan.end();
+
+    const saveSpan = profiler.start("save");
+    await database.insert(decoded);
+    saveSpan.end();
+  }
+};
+```

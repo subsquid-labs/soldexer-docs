@@ -1,179 +1,98 @@
 ---
 title: "Quickstart"
-description: "Get started with Pipes SDK for Solana in minutes"
+description: "Get started with Pipes SDK in minutes"
 ---
 
-Index Orca Whirlpool swap instructions from Solana mainnet.
+Index Orca Whirlpool swap instructions on Solana mainnet.
 
 ## Prerequisites
 
-- Node.js 22+ installed
-- TypeScript project initialized
+- Node.js 22.15+ installed
+- pnpm (recommended): `npm install -g pnpm`, or if pnpm is under `~/node/bin`, run `export PATH=${PATH}:${HOME}/node/bin` before the init command
 
-<Steps>
-<Step title="Download and install">
-  Install the Pipes SDK package.
+## Initialize the project
 
-  <CodeGroup>
-  ```bash npm
-  npm install @subsquid/pipes
-  ```
+Run the following in an empty directory, then follow the instructions.
 
-  ```bash pnpm
-  pnpm add @subsquid/pipes
-  ```
 
-  ```bash yarn
-  yarn add @subsquid/pipes
-  ```
 
-  ```bash bun
-  bun add @subsquid/pipes
-  ```
-
-  </CodeGroup>
-</Step>
-
-<Step title="Create the script">
-  Create a file `index.ts` with the code listed below:
-
-```ts index.ts
-import {
-  solanaInstructionDecoder,
-  solanaPortalSource,
-} from "@subsquid/pipes/solana";
-import * as orcaWhirlpool from "./abi/orca_whirlpool/index.js";
-
-async function main() {
-  const source = solanaPortalSource({
-    portal: "https://portal.sqd.dev/datasets/solana-mainnet",
-  });
-
-  const decoder = solanaInstructionDecoder({
-    range: { from: 200000000, to: 200001000 },
-    programId: orcaWhirlpool.programId,
-    instructions: {
-      swap: orcaWhirlpool.instructions.swap,
-      swapV2: orcaWhirlpool.instructions.swapV2,
-    },
-  });
-
-  for await (const { data } of source.pipe(decoder)) {
-    console.log(`Swaps: ${data.swap.length + data.swapV2.length}`);
-    for (const swap of [...data.swap, ...data.swapV2]) {
-      console.log(
-        `  Slot ${swap.blockNumber}: Swap instruction in tx ${swap.transaction.signatures[0]}`
-      );
+```bash
+pnpx @iankressin/pipes-cli@latest init --config '{
+  "projectFolder": "orca-example",
+  "packageManager": "pnpm",
+  "sink": "postgresql",
+  "networkType": "svm",
+  "network": "solana-mainnet",
+  "templates": [
+    {
+      "templateId": "custom",
+      "params": {
+        "contracts": [
+          {
+            "contractAddress": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+            "contractName": "OrcaWhirlpool",
+            "contractEvents": [
+              {
+                "name": "swap",
+                "type": "instruction",
+                "inputs": [
+                  { "name": "amount", "type": "u64" },
+                  { "name": "sqrtPriceLimit", "type": "u128" }
+                ]
+              }
+            ]
+          }
+        ]
+      }
     }
-  }
+  ]
+}'
+```
+
+
+## What it's doing
+
+Find the following code at `src/index.ts`:
+
+
+```ts
+const custom = solanaInstructionDecoder({
+  range: { from: 'latest' },
+  programId: ['whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc'],
+  /**
+   * Or optionally use pass all events object directly to listen to all contract events
+   * ```ts
+   * events: myContractEvents,
+   * ```
+   */
+  instructions: {
+    swap: orcaWhirlpoolInstructions.swap,
+  },
+}).pipe(enrichEvents)
+
+export async function main() {
+  await solanaPortalSource({
+    portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+  })
+    .pipeComposite({
+      custom,
+    })
+    .pipeTo(
+      drizzleTarget({
+        db: drizzle(env.DB_CONNECTION_STR),
+        tables: [orcaWhirlpoolSwapTable],
+        onData: async ({ tx, data }) => {
+          for (const values of chunk(data.custom.swap)) {
+            await tx.insert(orcaWhirlpoolSwapTable).values(values)
+          }
+        },
+      }),
+    )
 }
-
-void main();
 ```
 
-</Step>
+Explanations TBA.
 
-<Step title="Run the script">
-  Execute the script to start indexing swap instructions.
 
-  <CodeGroup>
-  ```bash tsx
-  npx tsx index.ts
-  ```
 
-  ```bash ts-node
-  npx ts-node index.ts
-  ```
-
-  ```bash bun
-  bun index.ts
-  ```
-
-  </CodeGroup>
-
-You should see swap instructions printed to the console:
-
-```text
-Swaps: 42
-  Slot 200000123: Swap instruction in tx 0x123...
-  Slot 200000124: Swap instruction in tx 0x456...
-...
-```
-
-</Step>
-</Steps>
-
-## Complete Code
-
-<AccordionGroup>
-<Accordion title="View complete code with explanations">
-The complete code retrieves and decodes Orca Whirlpool swap instructions from Solana mainnet.
-
-```ts index.ts
-import {
-  solanaInstructionDecoder,
-  solanaPortalSource,
-} from "@subsquid/pipes/solana";
-import * as orcaWhirlpool from "./abi/orca_whirlpool/index.js";
-
-async function main() {
-  // Create a Portal source that streams blockchain data
-  const source = solanaPortalSource({
-    portal: "https://portal.sqd.dev/datasets/solana-mainnet",
-  });
-
-  // Create a decoder that automatically decodes swap instructions
-  const decoder = solanaInstructionDecoder({
-    // Process slots 200000000 to 200001000
-    range: { from: 200000000, to: 200001000 },
-    // Monitor the Orca Whirlpool program
-    programId: orcaWhirlpool.programId,
-    // Decode swap and swapV2 instructions using the program ABI
-    instructions: {
-      swap: orcaWhirlpool.instructions.swap,
-      swapV2: orcaWhirlpool.instructions.swapV2,
-    },
-  });
-
-  // Stream and process decoded instructions
-  for await (const { data } of source.pipe(decoder)) {
-    console.log(`Swaps: ${data.swap.length + data.swapV2.length}`);
-    // Each swap contains decoded instruction data
-    for (const swap of [...data.swap, ...data.swapV2]) {
-      console.log(
-        `  Slot ${swap.blockNumber}: Swap instruction in tx ${swap.transaction.signatures[0]}`
-      );
-    }
-  }
-}
-
-void main();
-```
-
-### How it works
-
-1. **Portal source**: `solanaPortalSource` connects to the Portal API and streams Solana blockchain data
-2. **Decoder**: `solanaInstructionDecoder` filters and decodes program instructions using ABIs
-3. **Pipe**: `.pipe()` chains the decoder to the source
-4. **Stream**: The `for await` loop processes batches of decoded data as they arrive
-
-### Data structure
-
-Each decoded swap instruction contains:
-
-- `blockNumber`: Slot number where the instruction occurred
-- `timestamp`: Block timestamp
-- `programId`: Program address that executed the instruction
-- `transaction`: Transaction details including signatures
-- `instruction`: Decoded instruction fields (accounts, data)
-- `rawInstruction`: Raw instruction data
-
-### Next steps
-
-- Use `range: { from: 'latest' }` to stream from the latest slots
-- Add multiple programs or instruction types
-- Use `createTarget` to persist data to a database
-- See [Basics](/en/sdk/pipes-sdk/solana/basics) for more examples
-
-</Accordion>
-</AccordionGroup>
+Many more TBA, eventually covering all major protocols.

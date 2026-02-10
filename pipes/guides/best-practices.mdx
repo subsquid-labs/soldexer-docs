@@ -1,0 +1,19 @@
+---
+title: "Best practices"
+description: "Pipes design recommendations"
+---
+
+### Where to keep state of stateful transforms
+
+ - Keep state in RAM if it can be cheaply reconstructed from limited historical data (example - 1-minute candles)
+ - Keep state in Clickhouse and use materialized views if your transforms
+    * Do not form long dependency chains in a latency critical app: each materialized view that depends on another materialized view increases the final latency.
+    * Change often. For very frequent changes on lightweight data prefer plain (non-materialized) views.
+   You must have computational resources to spare on the database machine to take this approach.
+ - If your destination requires pre-transformed data, consider using stateful transformers.
+    * [Sqlite-based](https://github.com/subsquid-labs/pipes-sdk-docs/blob/feat/stateful-transform-on-sqlite/src/advanced/evm/09.stateful-transform-on-sqlite.example.ts) - for small applications.
+    * For large applications consider connecting your pipe to [Apache Flink](https://flink.apache.org).
+
+### More
+
+TBA

@@ -9,7 +9,7 @@ Decode Orca Whirlpool swap instructions.
 
 **Use case**: Decode DEX swap instructions with typed instruction data.
 
-```ts
+```ts expandable
 import { createTarget } from "@subsquid/pipes";
 import {
   solanaPortalSource,
@@ -45,20 +45,6 @@ const target = createTarget({
 });
 
 await source.pipe(decoder).pipeTo(target);
-```
-
-### Data Flow
-
-```mermaid
-graph LR
-    A[Portal Source] --> B[Solana Instruction Decoder]
-    B --> C[Typed Instructions]
-    C --> D[Target]
-
-    style A fill:#dbeafe
-    style B fill:#dbeafe
-    style C fill:#dbeafe
-    style D fill:#dbeafe
 ```
 
 ## Composite Decoder

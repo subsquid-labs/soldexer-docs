@@ -1,0 +1,174 @@
+---
+title: "Logging"
+description: "Customize logging with Pino-compatible transports for Solana pipes"
+---
+
+The Pipes SDK uses a Pino-compatible logger, allowing you to integrate custom log transports and send logs to external services like GCP Cloud Logging, Sentry, or any other Pino-compatible destination.
+
+## Basic Custom Logger
+
+Pass a custom logger to the source to configure logging for your entire pipeline.
+
+```ts
+import { createTarget } from "@subsquid/pipes";
+import { solanaPortalSource } from "@subsquid/pipes/solana";
+import pino from "pino";
+
+const transport = pino.transport({
+  target: "pino-pretty",
+  options: {
+    colorize: true,
+    translateTime: "HH:MM:ss",
+  },
+});
+
+const source = solanaPortalSource({
+  portal: "https://portal.sqd.dev/datasets/solana-mainnet",
+  logger: pino(transport),
+});
+
+const target = createTarget({
+  write: async ({ logger, read }) => {
+    for await (const { data } of read()) {
+      logger.info({ count: data.length }, "Processed batch");
+    }
+  },
+});
+
+await source.pipeTo(target);
+```
+
+## Integration with Cloud Services
+
+You can use any Pino transport to send logs to cloud services. Pass the configured logger to the source.
+
+<Tabs>
+<Tab title="GCP Cloud Logging">
+
+```ts
+import { createTarget } from "@subsquid/pipes";
+import { solanaPortalSource } from "@subsquid/pipes/solana";
+import pino from "pino";
+
+const transport = pino.transport({
+  target: "@google-cloud/logging-pino",
+  options: {
+    projectId: "your-project-id",
+    logName: "solana-pipes-indexer",
+  },
+});
+
+const source = solanaPortalSource({
+  portal: "https://portal.sqd.dev/datasets/solana-mainnet",
+  logger: pino(transport),
+});
+
+const target = createTarget({
+  write: async ({ logger, read }) => {
+    for await (const { data } of read()) {
+      logger.info(
+        {
+          slotsProcessed: data.slots?.length,
+          instructionsCount: data.swap?.length,
+        },
+        "Batch processed"
+      );
+    }
+  },
+});
+
+await source.pipeTo(target);
+```
+
+</Tab>
+
+<Tab title="Sentry">
+
+```ts
+import { createTarget } from "@subsquid/pipes";
+import { solanaPortalSource } from "@subsquid/pipes/solana";
+import pino from "pino";
+
+const transport = pino.transport({
+  target: "pino-sentry-transport",
+  options: {
+    sentry: {
+      dsn: process.env.SENTRY_DSN,
+      environment: "production",
+    },
+    level: "error", // Only send errors to Sentry
+  },
+});
+
+const source = solanaPortalSource({
+  portal: "https://portal.sqd.dev/datasets/solana-mainnet",
+  logger: pino(transport),
+});
+
+const target = createTarget({
+  write: async ({ logger, read }) => {
+    for await (const { data } of read()) {
+      try {
+        await processData(data);
+        logger.info({ count: data.length }, "Batch processed");
+      } catch (error) {
+        logger.error({ error, data }, "Failed to process batch");
+      }
+    }
+  },
+});
+
+await source.pipeTo(target);
+```
+
+</Tab>
+
+<Tab title="Multiple Transports">
+
+```ts
+import { createTarget } from "@subsquid/pipes";
+import { solanaPortalSource } from "@subsquid/pipes/solana";
+import pino from "pino";
+
+const transport = pino.transport({
+  targets: [
+    {
+      target: "pino-pretty",
+      options: { colorize: true },
+      level: "info",
+    },
+    {
+      target: "@google-cloud/logging-pino",
+      options: { projectId: "your-project-id" },
+      level: "info",
+    },
+    {
+      target: "pino-sentry-transport",
+      options: { sentry: { dsn: process.env.SENTRY_DSN } },
+      level: "error",
+    },
+  ],
+});
+
+const source = solanaPortalSource({
+  portal: "https://portal.sqd.dev/datasets/solana-mainnet",
+  logger: pino(transport),
+});
+
+const target = createTarget({
+  write: async ({ logger, read }) => {
+    for await (const { data } of read()) {
+      logger.info({ count: data.length }, "Processed batch");
+    }
+  },
+});
+
+await source.pipeTo(target);
+```
+
+</Tab>
+</Tabs>
+
+<Tip>
+The `ctx.logger` in transformers and targets is the same logger instance passed to the source. Configure logging at the source level, then use `ctx.logger` throughout your pipeline for consistent logging.
+</Tip>

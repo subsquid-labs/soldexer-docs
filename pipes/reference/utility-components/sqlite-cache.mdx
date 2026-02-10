@@ -1,0 +1,30 @@
+---
+title: "sqliteCache"
+description: "SQLite cache for Portal responses (Solana)"
+---
+
+## portalSqliteCache
+
+Create SQLite cache for Portal responses. Use with `solanaPortalSource` to cache Portal API responses locally.
+
+```ts
+import { portalSqliteCache } from "@subsquid/pipes/portal-cache/node";
+import { solanaPortalSource } from "@subsquid/pipes/solana";
+
+const source = solanaPortalSource({
+  portal: "https://portal.sqd.dev/datasets/solana-mainnet",
+  cache: portalSqliteCache({
+    path: "./portal-cache.sqlite",
+  }),
+});
+```
+
+<Note>
+Import from `@subsquid/pipes/portal-cache/node` instead of `@subsquid/pipes/portal-cache`.
+</Note>
+
+### When to Use
+
+- Development iteration
+- Testing pipelines
+- Repeated processing of same slots
