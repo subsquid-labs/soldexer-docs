@@ -3,7 +3,11 @@ title: "Cursor management"
 description: "Resume indexing from a specific slot"
 ---
 
-Resume indexing from a specific slot using cursors.
+<Info>
+Cursors track the last successfully processed slot, allowing pipelines to resume after restarts without reprocessing historical data.
+</Info>
+
+Resume indexing from a specific slot using cursors:
 
 ```ts
 import { createTarget } from '@subsquid/pipes'
@@ -37,4 +41,14 @@ async function secondRun() {
 }
 ```
 
-Pass a cursor to `read()` to resume processing from a specific slot. The cursor format is `{ number: slotNumber }`.
+<Note>
+Pass a cursor to `read()` to resume processing from a specific slot. The cursor format is `{ number: slotNumber }`. This allows you to restart your indexer without reprocessing all historical data.
+</Note>
+
+<Tip>
+Store the cursor after successfully processing each batch to enable resumption. Use a database or file-based storage for persistence across restarts.
+</Tip>
+
+<Warning>
+Cursor updates are atomic. Either the entire slot batch succeeds and the cursor advances, or the cursor doesn't advance. Never manually modify cursor position without ensuring you don't create gaps in processed slots.
+</Warning>

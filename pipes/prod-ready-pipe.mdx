@@ -1,6 +1,7 @@
 ---
 title: "A prod-ready pipe"
 description: "Walkthrough of a production DEX liquidity pipe built with Pipes SDK"
+sidebarTitle: "Production Pipe Example"
 ---
 
 <Info>Although this is an EVM walkthrough, it shares most of the content with the future Solana version (TBA)</Info>
@@ -60,7 +61,7 @@ The CLI merges all decoders with `pipeComposite({ ...decoders })` so the Portal 
 
 ## 4. Transform pipe
 
-[`raw_liquidity_event_pipe.ts`](https://github.com/subsquid-labs/pipes-sqdgn-dex-example/blob/master/pipes/evm/liquidity/raw_liquidity_event_pipe.ts) takes the decoded composite and converts each protocol’s events into a single `DbLiquidityEvent` shape (pool, tokens, amounts, tick, fee, block/transaction/log indices, etc.) via protocol-specific converters in `converters/`, then sorts by block/tx/log index:
+[`raw_liquidity_event_pipe.ts`](https://github.com/subsquid-labs/pipes-sqdgn-dex-example/blob/master/pipes/evm/liquidity/raw_liquidity_event_pipe.ts) takes the decoded composite and converts each protocol's events into a single `DbLiquidityEvent` shape (pool, tokens, amounts, tick, fee, block/transaction/log indices, etc.) via protocol-specific converters in `converters/`, then sorts by block/tx/log index:
 
 ```typescript
 return ({ uniswapV2, uniswapV3, uniswapV4, aerodromeBasic, aerodromeSlipstream }: InputType) => {
