@@ -1,0 +1,136 @@
+---
+title: "Handling program instructions"
+description: "Fetching and decoding Solana program instructions with solanaInstructionDecoder"
+---
+
+`solanaInstructionDecoder()` bundles a Solana instruction query with a decoding transform into a single reusable module. Pass the result as an output to `solanaPortalStream`:
+
+```ts
+import * as orcaWhirlpool from './abi/orca_whirlpool'
+import { solanaInstructionDecoder, solanaPortalStream } from '@subsquid/pipes/solana'
+
+const stream = solanaPortalStream({
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+  outputs: {
+    orcaWhirlpool: solanaInstructionDecoder({
+      range: { from: 340_000_000 },
+      programId: orcaWhirlpool.programId,
+      instructions: {
+        swap: orcaWhirlpool.instructions.swap,
+        swapV2: orcaWhirlpool.instructions.swapV2,
+      },
+    }),
+  },
+})
+
+for await (const { data } of stream) {
+  console.log(`parsed ${data.orcaWhirlpool.swap.length} swaps`)
+}
+```
+
+`solanaInstructionDecoder()` can:
+
+- Fetch from **one or multiple programs** — pass a single address or an array to `programId`.
+- Filter by **instruction type** — only instructions whose discriminator matches one of the entries in `instructions` are fetched and decoded.
+- Handle decode errors with a custom **`onError` callback** instead of letting them propagate.
+
+See the [solanaInstructionDecoder() reference](../../reference/utility-components/instruction-decoder) for all parameters.
+
+## Generating a typed ABI module
+
+Typed ABI modules for Solana programs are generated from [Anchor IDL](https://www.anchor-lang.com/docs/basics/idl) files by `@subsquid/solana-typegen`. Each generated module exports typed decode functions, so decoded instruction field types are statically known at compile time — you get precise type checking and IDE autocompletion across the entire pipeline.
+
+**Install:**
+
+```bash
+npm install -D @subsquid/solana-typegen
+```
+
+### From a local IDL file
+
+```bash
+npx squid-solana-typegen src/abi whirlpool.json
+```
+
+The output module name is derived from the filename (`whirlpool`). Override it with a `#name` fragment:
+
+```bash
+npx squid-solana-typegen src/abi whirlpool.json#orca_whirlpool
+```
+
+### From a program address
+
+For Anchor programs that publish their IDL on-chain, pass the program address directly:
+
+```bash
+npx squid-solana-typegen src/abi whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc#orca_whirlpool
+```
+
+The tool tries two sources in parallel: the on-chain IDL account (defaulting to Solana mainnet) and the [SolanaFM](https://solana.fm) IDL database. It fails only if both sources fail. Use `--solana-rpc-endpoint` to point at a different RPC endpoint:
+
+```bash
+npx squid-solana-typegen \
+  --solana-rpc-endpoint https://my-rpc.example.com \
+  src/abi \
+  whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc#orca_whirlpool
+```
+
+Without the `#name` fragment the program address itself becomes the module name.
+
+### From a URL
+
+```bash
+npx squid-solana-typegen src/abi https://example.com/whirlpool.json#orca_whirlpool
+```
+
+## Generated module structure
+
+For an input named `orca_whirlpool`, the tool creates:
+
+```
+src/abi/
+  abi.support.ts              # shared runtime, generated once per output dir
+  orca_whirlpool/
+    index.ts                  # re-exports + programId
+    instructions.ts           # one typed constant per instruction
+    events.ts                 # one typed constant per event (if any)
+    types.ts                  # shared struct types
+```
+
+Each entry in `instructions.ts` is a TypeScript interface (the decoded shape) alongside a constant carrying the discriminator and decode logic:
+
+```ts
+export interface CloseBundledPosition {
+    bundleIndex: number
+}
+
+export const closeBundledPosition = instruction(
+    { d8: '0x2924d8f51b556743' },
+    {
+        bundledPosition: 0,
+        positionBundle: 1,
+        positionBundleTokenAccount: 2,
+        positionBundleAuthority: 3,
+        receiver: 4,
+        whirlpoolProgram: 5,
+    },
+    struct({ bundleIndex: u16 })
+)
+```
+
+The `d8` discriminator and account index map are embedded in the constant — `solanaInstructionDecoder()` reads them automatically to build the source query filter.
+
+## Accessing decoded data
+
+The keys of the `instructions` map become field names in the decoded output batch. Each field is an array of decoded instruction objects:
+
+```ts
+for await (const { data } of stream) {
+  for (const ins of data.orcaWhirlpool.swap) {
+    const { accounts, data: fields } = ins.instruction
+    console.log(accounts.tokenAuthority, fields.amount)
+  }
+}
+```
+
+See the [decoded instruction structure](../../reference/utility-components/instruction-decoder#decoded-instruction-structure) reference for the full field list.

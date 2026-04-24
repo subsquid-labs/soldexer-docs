@@ -1,0 +1,29 @@
+---
+title: "Running bare bones"
+description: "Using a pipe as a plain async iterator without extra services"
+---
+
+By default, `solanaPortalSource` activates a console logger. Passing `metrics` and `progress` enables those services. To embed a pipe into external code with no side effects, disable them all:
+
+```ts
+import { solanaQuery, solanaPortalStream } from '@subsquid/pipes/solana'
+
+const stream = solanaPortalStream({
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+  outputs: solanaQuery()
+    .addFields({ block: { number: true, timestamp: true } })
+    .includeAllBlocks()
+    .build(),
+  logger: false,   // disable all log output
+  profiler: false, // profiler disabled under all circumstances
+  // omit `metrics` — no metrics server
+  // omit `progress` — no progress reporting
+})
+
+for await (const { data } of stream) {
+  // data is Block[]
+  console.log(data.length)
+}
+```
+
+The source becomes a plain async iterable that yields `{ data, ctx }` per batch. `ctx.logger` is a no-op when `logger: false`.

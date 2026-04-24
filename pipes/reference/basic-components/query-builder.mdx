@@ -1,0 +1,279 @@
+---
+title: "Query builder"
+description: "API reference for SolanaQueryBuilder"
+---
+
+`SolanaQueryBuilder` assembles a typed portal query from a field selection and one or more data-request clauses. Pass `.build()` to `outputs` (or to `.pipe()`) on a Solana source. The resulting object is consumed by [`solanaPortalStream()`](./source) and by the [solanaInstructionDecoder](../utility-components/instruction-decoder) which composes on top of it.
+
+## `solanaQuery()`
+
+Returns a fresh `SolanaQueryBuilder`.
+
+```ts
+import { solanaQuery } from '@subsquid/pipes/solana'
+
+const query = solanaQuery()
+  .addFields({
+    block: { number: true, timestamp: true },
+    instruction: { programId: true, data: true, accounts: true },
+  })
+  .addInstruction({
+    range: { from: 200_000_000 },
+    request: {
+      programId: ['whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc'],
+    },
+  })
+  .build()
+```
+
+## `SolanaQueryBuilder<F>`
+
+```ts
+class SolanaQueryBuilder<F extends FieldSelection = {}> {
+  addFields<T>(fields: Subset<T, FieldSelection>): SolanaQueryBuilder<F & T>
+  addInstruction(options: RequestOptions<InstructionRequest>): this
+  addTransaction(options: RequestOptions<TransactionRequest>): this
+  addLog(options: RequestOptions<LogRequest>): this
+  addBalance(options: RequestOptions<BalanceRequest>): this
+  addTokenBalance(options: RequestOptions<TokenBalanceRequest>): this
+  addReward(options: RequestOptions<RewardRequest>): this
+  includeAllBlocks(range?: Range): this
+  addRange(range: PortalRange): this
+  merge(other?: SolanaQueryBuilder<F>): this
+  build(opts?: { setupQuery?: SetupQueryFn<SolanaQueryBuilder<F>> }): QueryAwareTransformer
+}
+```
+
+The generic parameter `F` narrows the block type produced by the stream — only fields explicitly selected with `.addFields()` appear on the decoded records, at both compile and runtime.
+
+### `RequestOptions<R>` and `Range`
+
+```ts
+type RequestOptions<R> = { range: PortalRange; request: R }
+type PortalRange = { from?: number | string | 'latest' | Date; to?: number | string | Date }
+type Range        = { from: number; to?: number }
+```
+
+`PortalRange.from` defaults to `0`; a `Date` or numeric timestamp is resolved to a slot via the portal at query start. `'latest'` is resolved to the current head. `includeAllBlocks()` accepts the stricter `Range`, so dates and `'latest'` are not allowed there.
+
+In Solana, `number` identifies a **slot**. Slot and block height differ: skipped slots do not increment `height`.
+
+---
+
+## `.addFields(fields)`
+
+Add to the field selection. Repeated calls are merged recursively.
+
+### `block`
+
+| Field | Type |
+|---|---|
+| `number` | `number` (slot; always returned) |
+| `hash` | `string` (always returned) |
+| `height` | `number` (block height, skips not counted) |
+| `parentNumber` | `number` |
+| `parentHash` | `string` |
+| `timestamp` | `number` (Unix seconds) |
+
+### `transaction`
+
+| Field | Type |
+|---|---|
+| `transactionIndex` | `number` |
+| `version` | `'legacy' \| number` |
+| `accountKeys` | `string[]` |
+| `addressTableLookups` | `{ accountKey, readonlyIndexes, writableIndexes }[]` |
+| `numReadonlySignedAccounts` | `number` |
+| `numReadonlyUnsignedAccounts` | `number` |
+| `numRequiredSignatures` | `number` |
+| `recentBlockhash` | `string` |
+| `signatures` | `string[]` |
+| `err` | `null \| object` (error details, `null` on success) |
+| `computeUnitsConsumed` | `bigint` |
+| `fee` | `bigint` (lamports) |
+| `loadedAddresses` | `{ readonly: string[]; writable: string[] }?` |
+| `hasDroppedLogMessages` | `boolean` |
+
+### `instruction`
+
+| Field | Type |
+|---|---|
+| `transactionIndex` | `number` |
+| `instructionAddress` | `number[]` (path in the call tree) |
+| `programId` | `string` |
+| `accounts` | `string[]` |
+| `data` | `string` |
+| `computeUnitsConsumed` | `bigint?` |
+| `error` | `unknown?` |
+| `isCommitted` | `boolean` (`false` when the enclosing transaction failed) |
+| `hasDroppedLogMessages` | `boolean` |
+
+### `log`
+
+| Field | Type |
+|---|---|
+| `transactionIndex` | `number` |
+| `logIndex` | `number` |
+| `instructionAddress` | `number[]` |
+| `programId` | `string` |
+| `kind` | `'log' \| 'data' \| 'other'` |
+| `message` | `string` |
+
+### `balance`
+
+SOL balance change for one account within one transaction.
+
+| Field | Type |
+|---|---|
+| `transactionIndex` | `number` |
+| `account` | `string` |
+| `pre` | `bigint` (lamports before) |
+| `post` | `bigint` (lamports after) |
+
+### `tokenBalance`
+
+SPL-token balance change. Records are a tagged union: some updates carry only `pre*` fields (token account removed), some only `post*` (token account created), and some both.
+
+| Field | Type |
+|---|---|
+| `transactionIndex` | `number` |
+| `account` | `string` (token account) |
+| `preProgramId`, `preMint`, `preDecimals`, `preOwner`, `preAmount` | before state |
+| `postProgramId`, `postMint`, `postDecimals`, `postOwner`, `postAmount` | after state |
+
+### `reward`
+
+| Field | Type |
+|---|---|
+| `pubkey` | `string` |
+| `lamports` | `bigint` |
+| `postBalance` | `bigint` |
+| `rewardType` | `string?` (`fee`, `rent`, `voting`, `staking`) |
+| `commission` | `number?` |
+
+---
+
+## `.addInstruction(options)`
+
+Filter instructions. List filters AND across fields; values within a field OR. Matches instructions anywhere in the call tree, not just top-level.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `programId` | `string[]` | Program that executes the instruction. |
+| `d1`, `d2`, `d4`, `d8` | `string[]` | First 1/2/4/8 bytes of `data` in `0x`-prefixed hex — used as Anchor discriminators. |
+| `a0`–`a9` | `string[]` | Account at position 0..9 of the instruction's account list. |
+| `isCommitted` | `boolean` | Restrict to committed (successful) instructions. |
+| `transaction` | `boolean` | Also fetch the parent transaction. |
+| `transactionBalances` | `boolean` | Also fetch SOL balance updates for parent transactions. |
+| `transactionTokenBalances` | `boolean` | Also fetch token balance updates for parent transactions. |
+| `transactionInstructions` | `boolean` | Also fetch sibling instructions executed by the parent transaction. |
+| `innerInstructions` | `boolean` | Also fetch all inner instructions (entire subtrees) of matching instructions. |
+| `logs` | `boolean` | Also fetch logs produced by matching instructions. |
+
+An empty `request: {}` matches every instruction in the range.
+
+```ts
+solanaQuery().addInstruction({
+  range: { from: 200_000_000 },
+  request: {
+    programId: ['whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc'],
+    d8: ['0xf8c69e91e17587c8'], // 8-byte Anchor discriminator for Whirlpool `swap`
+    isCommitted: true,
+    innerInstructions: true,
+  },
+})
+```
+
+<Note>
+The portal accepts account-position filters up to `a15` and a `mentionsAccount` filter that matches an account anywhere in the list. These are not exposed by the builder; use a raw query via [`portal.getStream()`](./source#symboliterator) if you need them.
+</Note>
+
+## `.addTransaction(options)`
+
+Filter transactions.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `feePayer` | `string[]` | Fee-payer account. |
+| `instructions` | `boolean` | Also fetch all instructions executed in matching transactions. |
+| `logs` | `boolean` | Also fetch all logs produced by matching transactions. |
+
+## `.addLog(options)`
+
+Filter program log messages.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `programId` | `string[]` | Program that produced the log. |
+| `kind` | `('log' \| 'data' \| 'other')[]` | Log type. |
+| `transaction` | `boolean` | Also fetch the parent transaction. |
+| `instruction` | `boolean` | Also fetch the instruction the log was emitted from. |
+
+## `.addBalance(options)`
+
+Filter SOL balance updates.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `account` | `string[]` | Account whose balance changed. |
+| `transaction` | `boolean` | Also fetch the parent transaction. |
+| `transactionInstructions` | `boolean` | Also fetch all instructions of parent transactions. |
+
+## `.addTokenBalance(options)`
+
+Filter SPL-token balance updates.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `account` | `string[]` | Token account. |
+| `preProgramId`, `postProgramId` | `string[]` | Token program ID before / after. |
+| `preMint`, `postMint` | `string[]` | Mint before / after. |
+| `preOwner`, `postOwner` | `string[]` | Owner before / after. |
+| `transaction` | `boolean` | Also fetch the parent transaction. |
+| `transactionInstructions` | `boolean` | Also fetch all instructions of parent transactions. |
+
+## `.addReward(options)`
+
+Filter validator rewards.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `pubkey` | `string[]` | Validator public key. |
+
+## `.includeAllBlocks(range?)`
+
+Request every slot in `range` regardless of whether any other filter matches. Useful when you want uninterrupted timestamps or slot progression even across slots with no targeted activity. Without `range`, applies from slot 0 onward.
+
+```ts
+solanaQuery().includeAllBlocks({ from: 200_000_000, to: 200_001_000 })
+```
+
+## `.addRange(range)`
+
+Push a range-only request with no filters — typically used to bound a stream built from other sources.
+
+## `.merge(other)`
+
+Merge another builder's requests and fields in-place. Overlapping ranges are reconciled at build time.
+
+## `.build(opts?)`
+
+Return a `QueryAwareTransformer` suitable for use as a source output.
+
+```ts
+solanaPortalStream({
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+  outputs: { swaps: solanaQuery().addInstruction({/*…*/}).build() },
+})
+```
+
+`opts.setupQuery` is an advanced hook called when the query is finalized: it receives `{ query, logger }` and can mutate `query` (e.g. merge additional requests from runtime data). Default behaviour is to merge `this` into the stream's root query.
+
+---
+
+## See also
+
+- [Source](./source) — how queries attach to the stream.
+- [solanaInstructionDecoder](../utility-components/instruction-decoder) — typed wrapper that emits a pre-built query plus instruction decoding.
+- [Handling program instructions](../../guides/basic-development/handling-instructions) — higher-level guide.
+- [Portal API (Solana) OpenAPI](/en/api/solana/reference) — raw wire protocol this builder serialises to.

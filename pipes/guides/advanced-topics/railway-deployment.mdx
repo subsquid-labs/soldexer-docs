@@ -1,0 +1,284 @@
+---
+title: "Railway deployment"
+description: "Deploying a Pipes SDK project to Railway"
+---
+
+This guide walks you through deploying a Pipes SDK indexer to [Railway](https://railway.app). You'll end up with four services running together: your indexer, a database (PostgreSQL or ClickHouse), and the Pipe UI dashboard.
+
+## Prerequisites
+
+- A [Railway account](https://railway.app)
+- Your project pushed to a **public or private GitHub repository**
+- Your project built with `pipes init` (which generates a `Dockerfile` and `docker-compose.yaml`)
+
+---
+
+## Option A — Drag & Drop via the Railway Dashboard
+
+The quickest way to get started is to drop your `docker-compose.yaml` directly onto the Railway project canvas.
+
+### Step 1 — Create a new project on Railway
+
+1. Go to [railway.app/new](https://railway.app/new) and click **Empty Project**.
+
+### Step 2 — Drag and drop your `docker-compose.yaml`
+
+1. Open your project canvas.
+2. Drag the `docker-compose.yaml` file from your project root and drop it anywhere on the canvas.
+
+Railway parses the file and creates a service for each entry. For a typical Pipes SDK project this produces:
+
+| Service | Image / Source |
+|---|---|
+| Your indexer | Built from your local `Dockerfile` |
+| `postgres` or `clickhouse` | Official Docker images |
+
+### Step 3 — Link the indexer service to your GitHub repository
+
+1. Click the indexer service card on the canvas.
+2. Go to **Settings → Source** and choose **GitHub Repo**.
+3. Select your repository and branch.
+
+Railway will now redeploy automatically on every push.
+
+### Step 4 — Add the Pipe UI service
+
+1. Click **+ New Service** on the canvas.
+2. Choose **Docker Image** and enter `iankguimaraes/pipe-ui:latest`.
+3. Go to the service's **Variables** tab and add:
+   ```
+   METRICS_SERVER_URL=${{Pipes.RAILWAY_PRIVATE_DOMAIN}}:9090
+   ```
+   Replace `Pipes` with the actual name Railway assigned to your indexer service.
+
+### Step 5 — Generate public domains
+
+For each service that needs a public URL:
+
+1. Click the service card.
+2. Go to **Settings → Networking → Public Networking**.
+3. Click **Generate Domain** and set the correct port (`3000` for Pipe UI, `5432` for PostgreSQL, `8123` for ClickHouse).
+
+---
+
+## Option B — Railway CLI
+
+If you prefer the terminal, the Railway CLI gives you full control over every service and environment variable.
+
+### Step 1 — Install the Railway CLI
+
+```bash
+# macOS / Linux
+curl -fsSL https://railway.app/install.sh | sh
+
+# or via npm
+npm install -g @railway/cli
+```
+
+### Step 2 — Log in to Railway
+
+```bash
+railway login
+```
+
+This opens a browser window for OAuth authentication. After approving, the CLI is authenticated for the current session.
+
+### Step 3 — Initialize the Railway project
+
+Run this from the root of your indexer project:
+
+```bash
+railway init --name "your-project-name"
+```
+
+Use the same name as the `name` field in your `package.json`. This creates a new project on Railway and links the current directory to it.
+
+### Step 4 — Add the database service
+
+**If your project uses PostgreSQL** (projects with `drizzle.config.ts`):
+
+```bash
+railway add -d postgres
+```
+
+Railway provisions a managed PostgreSQL instance and injects a `DATABASE_URL` variable automatically.
+
+**If your project uses ClickHouse:**
+
+```bash
+railway add \
+  --service Clickhouse \
+  --image clickhouse/clickhouse-server:latest \
+  --variables CLICKHOUSE_DB=pipes \
+  --variables CLICKHOUSE_USER=default \
+  --variables CLICKHOUSE_PASSWORD=password
+```
+
+### Step 5 — Add the indexer service
+
+Replace `your-org/your-repo` with your actual GitHub repository slug.
+
+**PostgreSQL project:**
+
+```bash
+railway add \
+  --service Pipes \
+  --repo your-org/your-repo \
+  --variables "DB_CONNECTION_STR=\${{Postgres.DATABASE_URL}}"
+```
+
+**ClickHouse project:**
+
+```bash
+railway add \
+  --service Pipes \
+  --repo your-org/your-repo \
+  --variables "CLICKHOUSE_URL=http://\${{Clickhouse.RAILWAY_PRIVATE_DOMAIN}}:8123" \
+  --variables CLICKHOUSE_DB=pipes \
+  --variables CLICKHOUSE_USER=default \
+  --variables CLICKHOUSE_PASSWORD=password
+```
+
+> **Note on variable syntax:** `${{ServiceName.VARIABLE}}` is Railway's cross-service reference syntax. The shell requires escaping the `$` as `\$` when passing it through the CLI; Railway resolves it at runtime.
+
+The `--repo` flag links this service to your GitHub repository and enables automatic deployments on every push to the default branch.
+
+### Step 6 — Add the Pipe UI dashboard
+
+```bash
+railway add \
+  --service PipeUI \
+  --image iankguimaraes/pipe-ui:latest \
+  --variables "METRICS_SERVER_URL=\${{Pipes.RAILWAY_PRIVATE_DOMAIN}}:9090"
+```
+
+The Pipe UI connects to your indexer's metrics endpoint (port 9090, exposed by the indexer at runtime).
+
+### Step 7 — Generate public domains
+
+Give each service a publicly accessible URL:
+
+**PostgreSQL project:**
+
+```bash
+# Expose the database
+railway domain --service Postgres --port 5432
+
+# Expose the UI
+railway domain --service PipeUI --port 3000
+```
+
+**ClickHouse project:**
+
+```bash
+# Expose the database
+railway domain --service Clickhouse --port 8123
+
+# Expose the UI
+railway domain --service PipeUI --port 3000
+```
+
+### Step 8 — Open the Railway dashboard
+
+```bash
+railway open
+```
+
+This opens your project in the Railway web UI where you can monitor deployments, view logs, and manage environment variables.
+
+---
+
+## Service Architecture
+
+```
+┌──────────────────────────────────────────────────────┐
+│                   Railway Project                    │
+│                                                      │
+│  ┌─────────────┐     private network                 │
+│  │   Database  │◄────────────────────┐               │
+│  │  (Postgres  │                     │               │
+│  │ /Clickhouse)│                     │               │
+│  └──────┬──────┘                     │               │
+│         │ public domain (optional)   │               │
+│                               ┌──────┴──────┐        │
+│                               │   Indexer   │        │
+│                               │   (Pipes)   │        │
+│                               └──────┬──────┘        │
+│                                      │ :9090 metrics  │
+│                               ┌──────▼──────┐        │
+│                               │   Pipe UI   │        │
+│                               │  (PipeUI)   │        │
+│                               └──────┬──────┘        │
+│                                      │ public domain  │
+└──────────────────────────────────────┼───────────────┘
+                                       ▼
+                                  Browser / API
+```
+
+Services communicate over Railway's private network using `${{ServiceName.RAILWAY_PRIVATE_DOMAIN}}` references. Only the UI (and optionally the database) need public domains.
+
+---
+
+## Environment Variables Reference
+
+### Indexer (PostgreSQL)
+
+| Variable | Value |
+|---|---|
+| `DB_CONNECTION_STR` | `${{Postgres.DATABASE_URL}}` |
+
+### Indexer (ClickHouse)
+
+| Variable | Value |
+|---|---|
+| `CLICKHOUSE_URL` | `http://${{Clickhouse.RAILWAY_PRIVATE_DOMAIN}}:8123` |
+| `CLICKHOUSE_DB` | `pipes` |
+| `CLICKHOUSE_USER` | `default` |
+| `CLICKHOUSE_PASSWORD` | `password` |
+
+### ClickHouse service
+
+| Variable | Value |
+|---|---|
+| `CLICKHOUSE_DB` | `pipes` |
+| `CLICKHOUSE_USER` | `default` |
+| `CLICKHOUSE_PASSWORD` | `password` |
+
+### Pipe UI
+
+| Variable | Value |
+|---|---|
+| `METRICS_SERVER_URL` | `${{Pipes.RAILWAY_PRIVATE_DOMAIN}}:9090` |
+
+---
+
+## Dockerfile Overview
+
+Your project's `Dockerfile` (generated by `pipes init`) uses a two-stage build:
+
+1. **Builder stage** — installs dependencies with `pnpm`, compiles TypeScript to `dist/`.
+2. **Runner stage** — copies only the production build, runs migrations (PostgreSQL only), then starts the indexer.
+
+The indexer exposes **port 9090** for metrics, which Pipe UI connects to.
+
+```dockerfile
+EXPOSE 9090
+CMD ["sh", "-lc", "pnpm db:generate && pnpm db:migrate && node dist/index.js"]
+# (PostgreSQL only; ClickHouse projects skip the migration step)
+```
+
+---
+
+## Troubleshooting
+
+**Indexer fails to start — cannot connect to database**
+The database service may not be healthy yet. Railway starts services in parallel; the indexer's health-check retry logic should handle this, but you can also set a startup delay under **Settings → Deploy → Start Command**.
+
+**`${{...}}` variables show as literal strings**
+Cross-service references are resolved at deploy time. Make sure both services are in the same Railway project and the referenced service name matches exactly (case-sensitive).
+
+**ClickHouse connection refused**
+Confirm `CLICKHOUSE_URL` uses the private domain (`RAILWAY_PRIVATE_DOMAIN`), not a public URL, and that port 8123 is correct.
+
+**Pipe UI shows no data**
+Check that `METRICS_SERVER_URL` points to the private domain of the indexer service and that port 9090 is included.

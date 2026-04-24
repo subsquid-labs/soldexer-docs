@@ -1,0 +1,59 @@
+---
+title: "Profiling"
+description: "Measure where time is spent in a Solana pipe"
+---
+
+Pipes SDK ships a built-in per-batch profiler. It records how long each part of the pipeline takes. When a [`metricsServer()`](../../reference/utility-components/metrics-server) is attached to the source, the profiler output is served as JSON at `http://localhost:<metrics_port>/profiler` and rendered live in [Pipes UI](../basic-development/pipes-ui).
+
+## Enabling the profiler
+
+The profiler is **on by default** when `process.env.NODE_ENV !== 'production'` and **off** otherwise. Override explicitly with `profiler: true` or `profiler: false` on the source.
+
+```ts
+solanaPortalStream({
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+  outputs: /* ... */,
+  metrics: metricsServer({ port: 9090 }),
+  profiler: true,   // force on — useful in production
+})
+```
+
+## Interpreting the output
+
+The pipeline is represented as a tree. Each node reports how long was spent in that stage of a batch. A typical tree looks like:
+
+```
+batch
+├── fetch data
+├── apply transformers
+│   ├── track progress
+│   └── Solana decoder
+├── clickhouse
+│   ├── data handler
+│   ├── insert cursor
+│   └── cleanup cursors
+└── metrics processing
+```
+
+## Custom spans
+
+Wrap any code in your target or transformer to get it to appear as a tree node. `ctx.profiler.start()` is a no-op when the profiler is disabled, so the instrumentation is safe to leave in place.
+
+```ts
+onData: async ({ data, ctx }) => {
+  const span = ctx.profiler.start('my measure')
+  await myDataProcessing(data)
+  span.end()
+},
+```
+
+The named span appears under its parent node in the tree:
+
+```
+batch
+...
+├── clickhouse
+│   ├── data handler
+│   │   └── my measure
+...
+```

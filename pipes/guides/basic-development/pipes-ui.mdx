@@ -1,0 +1,71 @@
+---
+title: "Pipes UI"
+description: "Live dashboard for monitoring a running pipe"
+---
+
+Pipes UI is a local web dashboard that connects to a running pipe and visualises its progress, speed, portal query, and profiler breakdown. It reads the metrics server that the SDK exposes on the pipe process — nothing needs to be deployed or hosted.
+
+<Frame>
+  <video
+    controls
+    autoPlay
+    loop
+    muted
+    className="w-full aspect-video rounded-xl"
+    src="/videos/pipes-ui.mov"
+  ></video>
+</Frame>
+
+## Expose metrics on the pipe
+
+Attach [`metricsServer()`](../advanced-topics/metrics) to the source. Listens on `localhost:9090` by default.
+
+```ts
+import { evmPortalStream, evmDecoder, commonAbis } from '@subsquid/pipes/evm'
+import { metricsServer } from '@subsquid/pipes/metrics/node'
+
+evmPortalStream({
+  id: 'my-pipe',                       // shows up in the dashboard as the pipe name
+  portal: 'https://portal.sqd.dev/datasets/ethereum-mainnet',
+  outputs: evmDecoder({
+    profiler: { name: 'transfers' },   // labels this span in the profiler tree
+    range: { from: 'latest' },
+    events: { transfers: commonAbis.erc20.events.Transfer },
+  }),
+  metrics: metricsServer(),            // exposes /metrics, /stats, /profiler, /health on :9090
+})
+```
+
+Start the pipe as usual (`ts-node`, `bun`, compiled JS, etc.).
+
+## Run the dashboard
+
+In a second terminal:
+
+```bash
+npx @subsquid/pipes-ui@alpha
+```
+
+The UI serves on `http://localhost:3000` and polls the metrics server at `http://localhost:9090`. Open the URL in a browser — the page auto-refreshes once the pipe starts producing batches.
+
+## What it shows
+
+Per pipe (keyed by the `id` passed to the source):
+
+- chain / dataset, with the inferred chain kind (EVM, Solana, …)
+- progress: current block, target block, percent complete, ETA
+- throughput: blocks/s and bytes/s over the last 30 samples
+- the serialised portal query (helpful for reviewing what your decoder actually asked for)
+- memory usage of the pipe process and SDK version
+
+When [profiling is on](../advanced-topics/profiling) (the default in non-production environments), the UI also renders the per-batch span tree — useful for seeing which stage (`fetch data`, `apply transformers`, a named decoder, your own `ctx.profiler.start('…')` spans) is dominating batch time. Decorate spans you want to track with `profiler: { name: '…' }` on transformers and decoders.
+
+Any [custom metrics](../advanced-topics/metrics) you register via `ctx.metrics.counter()`, `.gauge()`, `.histogram()`, or `.summary()` show up on the pipe's `/metrics` endpoint (as Prometheus text). The dashboard does not render arbitrary custom series — if you need charts for your own metrics, scrape `/metrics` with Prometheus and graph with Grafana.
+
+The full list of HTTP endpoints served by the metrics process (useful for ad-hoc `curl` inspection) is in the [metricsServer reference](../../reference/utility-components/metrics-server#endpoints).
+
+## Troubleshooting
+
+- **"Failed to reach metrics server"** on the UI — the pipe is not running, or `metricsServer()` is not attached to the source, or it listens on a non-default port. Start the pipe first, then reload the dashboard.
+- **UI shows no pipes** — the source config is missing an `id`. Add `id: 'my-pipe'` to the source options.
+- **Profiler tab is empty** — the pipe has `profiler: false` set on the source, or `NODE_ENV=production` (the default is to enable profiling only outside production). Set `profiler: true` on the source to force it on. See [Profiling](../advanced-topics/profiling).

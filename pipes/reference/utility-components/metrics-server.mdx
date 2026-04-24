@@ -1,28 +1,42 @@
 ---
 title: "metricsServer"
-description: "Expose Prometheus metrics from your pipe"
+description: "Expose Prometheus metrics and the live-stats API from your pipe"
 ---
 
-## metricsServer
-
-Start a Prometheus metrics server so Pipe UI and other tools can scrape pipeline metrics.
+Start a metrics server on the pipe process. Required by [Pipes UI](../../guides/basic-development/pipes-ui) and by anything that scrapes Prometheus (Grafana, Alertmanager, etc.).
 
 ```ts
 import { metricsServer } from "@subsquid/pipes/metrics/node";
-import { evmPortalSource } from "@subsquid/pipes/evm";
+import { solanaPortalStream } from "@subsquid/pipes/solana";
 
-const source = evmPortalSource({
-  portal: "https://portal.sqd.dev/datasets/ethereum-mainnet",
+solanaPortalStream({
+  // ...
   metrics: metricsServer({ port: 9090 }),
+  // ...
 });
 ```
 
 **Parameters:**
 
-- `port`: HTTP port for the metrics endpoint (default: 9090)
+- `port`: HTTP port for the server (default: `9090`).
 
-Metrics are available at `http://localhost:9090/metrics`. When profilers are enabled on decoders or transformers, their metrics are automatically exposed. You can also add custom metrics via `ctx.metrics` in your pipeline.
+## Endpoints
 
-<Info>
-Use with [Pipe UI](/en/sdk/pipes-sdk/guides/observing-debugging-pipes-ui) for a visual dashboard.
-</Info>
+`metricsServer()` serves four HTTP endpoints on the configured port. They are all also useful for ad-hoc inspection with `curl`.
+
+| Path | Content |
+|---|---|
+| `/stats` | JSON — per-pipe progress, speed, portal query, SDK version. This is what [Pipes UI](../../guides/basic-development/pipes-ui) polls. |
+| `/metrics` | Prometheus text — built-in `sqd_*` series plus any custom metrics you registered. Scrape this from Prometheus. |
+| `/profiler` | JSON — recent per-batch span trees. See [Profiling](../../guides/advanced-topics/profiling). Empty when profiling is disabled. |
+| `/health` | Responds with `ok`. |
+
+## Custom metrics
+
+Register counters, gauges, histograms, and summaries via `ctx.metrics` in [whole-pipe transformers](../basic-components/transformer), [targets](../basic-components/target), or when consuming the pipe as an async iterator. See the [Metrics guide](../../guides/advanced-topics/metrics).
+
+## See also
+
+- [Pipes UI](../../guides/basic-development/pipes-ui) — visual dashboard that consumes `/stats` and `/profiler`.
+- [Metrics](../../guides/advanced-topics/metrics) — walkthrough for exposing Prometheus metrics and adding custom series.
+- [Profiling](../../guides/advanced-topics/profiling) — interpreting the `/profiler` span tree.

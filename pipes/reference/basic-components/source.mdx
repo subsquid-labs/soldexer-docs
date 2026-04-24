@@ -3,6 +3,9 @@ title: "Source"
 description: "API reference for Solana Portal source"
 ---
 
+The source component connects to SQD Portal and streams blockchain data to your pipeline. It's the starting point for all Pipes SDK data flows.
+
+
 ## solanaPortalSource
 
 Create a Portal source for Solana chains.
@@ -11,25 +14,88 @@ Create a Portal source for Solana chains.
 solanaPortalSource(config: SolanaPortalSourceConfig): Source
 ```
 
+
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `portal` | `string \| PortalClientOptions` | Yes | Portal API URL or configuration object |
-| `query` | `SolanaQueryBuilder \| PortalRange` | No | Query builder instance or range object |
-| `cursor` | `{ number: number }` | No | Resume from a specific slot |
-| `cache` | `PortalCache` | No | Cache adapter for local caching |
-| `logger` | `Logger \| LogLevel` | No | Custom logger or log level |
-| `metrics` | `MetricsServer` | No | Metrics server for monitoring |
-| `progress` | `ProgressTrackerOptions` | No | Progress tracking configuration |
+- `id`: (required) Pipeline ID. Must be unique within any infra shared with other pipelines (DB, logging sinks etc).
+- `portal`: (required) Portal API URL or config object.
+  - String: `"https://portal.sqd.dev/datasets/ethereum-mainnet"`
+  - Object: `{ url: string, finalized?: boolean }`. When `finalized: true` is set the stream will consist of finalized blocks only and none of the [fork handling machinery](../../guides/architecture-deep-dives/fork-handling) will be required.
+
+- `outputs`: (required) A single query-transformers chain combo or record of named outputs.
+- `cache`: (optional) Portal cache instance. If supplied, saves portal responses locally and reuses them when the pipeline re-runs.
+- `logger`: (optional) A pino-compatible `Logger` instance or a log level string. Accepted level values: `'fatal'`, `'error'`, `'warn'`, `'info'`, `'debug'`, `'trace'`, `'silent'`, `false`, `null`. Passing `false` or `null` silences all log output. When omitted, a default console logger is used.
+- `metrics`: (optional) `metricsServer()` instance for exposing Prometheus metrics.
+- `progress`: (optional) Options for progress tracking.
+- `profiler`: (optional) Enable the built-in per-batch profiler. See [Profiling](../../guides/advanced-topics/profiling).
+
 
 **Example:**
 
 ```ts
+import { solanaPortalSource } from "@subsquid/pipes/solana";
+import { portalSqliteCache } from "@subsquid/pipes/portal-cache/node";
+
 const source = solanaPortalSource({
+  id: "orca-swaps",
   portal: "https://portal.sqd.dev/datasets/solana-mainnet",
-  query: queryBuilder,
-  cursor: { number: 200000000 },
+  outputs: solanaInstructionDecoder({
+    range: { from: 200000000 },
+    programId: orcaWhirlpool.programId,
+    instructions: { swap: orcaWhirlpool.instructions.swap },
+  }),
   cache: portalSqliteCache({ path: "./cache.sqlite" }),
 });
 ```
+
+
+### Finalized Blocks
+
+You can configure the source to only receive finalized blocks:
+
+```ts
+const source = solanaPortalSource({
+  portal: {
+    finalized: true,
+    url: 'https://portal.sqd.dev/datasets/solana-mainnet'
+  }
+});
+```
+
+Using finalized blocks eliminates the need for rollback handlers in your targets, simplifying the logic of your pipeline.
+
+## Pipe methods
+
+### pipe()
+
+Chain a single [whole-pipe transformer](./transformer) to the source.
+
+```ts
+source.pipe(transformer)
+```
+The returned value behaves exactly as the source.
+
+See also: [Stateful transformers](../../guides/advanced-topics/stateful-transforms).
+
+### pipeTo()
+
+Connect the pipeline to a [target](./target).
+
+```ts
+source.pipeTo(target)
+```
+
+This is a terminal operation: you cannot continue piping after calling this method.
+
+If you want your stream to resume on restarts and properly handle unfinalized data, make sure that the target [manages cursors](../../guides/architecture-deep-dives/cursor-management) and [handles forks](../../guides/architecture-deep-dives/fork-handling) correctly.
+
+### *[Symbol.asyncIterator]()
+
+Use the pipeline as an async iterator:
+
+```ts
+for await (const { data } of stream) {
+  // ... do something with data ...
+}
+```
+On blockchain forks this will throw `ForkException`s - see [Fork handling](../../guides/architecture-deep-dives/fork-handling).

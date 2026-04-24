@@ -1,0 +1,56 @@
+---
+title: "clickhouseTarget"
+description: "ClickHouse target for Pipes SDK"
+---
+
+See the [ClickHouse guide](../../../guides/basic-development/targets/clickhouse) for usage examples, table design, and setup instructions.
+
+```ts
+import { clickhouseTarget } from '@subsquid/pipes/targets/clickhouse'
+```
+
+## `clickhouseTarget`
+
+```ts
+clickhouseTarget<T>({
+  client: ClickHouseClient,
+  onStart?: (ctx: { store: ClickhouseStore; logger: Logger }) => unknown | Promise<unknown>,
+  onData: (ctx: { store: ClickhouseStore; data: T; ctx: Ctx }) => unknown | Promise<unknown>,
+  onRollback?: (ctx: {
+    type: 'offset_check' | 'blockchain_fork'
+    store: ClickhouseStore
+    safeCursor: BlockCursor
+    /** @deprecated Use `safeCursor` instead. */
+    cursor: BlockCursor
+  }) => unknown | Promise<unknown>,
+  settings?: Settings,
+})
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `client` | Yes | Client from `@clickhouse/client`. |
+| `onStart` | No | Runs once before processing starts. Use for table creation or other setup. |
+| `onData` | Yes | Called for each batch. |
+| `onRollback` | No | Called on startup (`'offset_check'`) and on each fork (`'blockchain_fork'`). |
+| `settings` | No | Configuration for the internal cursor state table. See `Settings` below. |
+
+**`Settings`:**
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `database` | Client's configured database | ClickHouse database for the state table. |
+| `table` | `'sync'` | Name of the state table. |
+| `id` | `'stream'` | Stream identifier within the state table. |
+| `maxRows` | `10000` | Maximum rows retained per stream id in the state table. |
+
+## `ClickhouseStore` methods
+
+| Method | Description |
+|--------|-------------|
+| `store.insert(params)` | Queues an insert. Non-blocking — returns a `Promise` but need not be awaited inside `onData`; inserts are flushed when the target closes. |
+| `store.query(params)` | Passthrough to `client.query()`. |
+| `store.command(params)` | Passthrough to `client.command()`. |
+| `store.removeAllRows({ tables, where, params? })` | Cancels rows matching `where` by re-inserting them with `sign = -1`. Requires `CollapsingMergeTree`. |
+| `store.removeAllRowsByQuery({ table, query, params? })` | Like `removeAllRows`, but uses a custom `SELECT` to identify the rows to cancel. |
+| `store.executeFiles(dir)` | Executes all `.sql` files found in `dir`. |

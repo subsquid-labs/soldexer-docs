@@ -32,16 +32,19 @@ import { jupiterAbi } from "./abi/jupiter";
 type SwapInstruction = AbiDecodeInstruction<typeof jupiterAbi.instructions.swap>;
 
 // Use in your code
-const decoder = solanaInstructionDecoder({
-  range: { from: 250000000 },
-  programId: jupiterAbi.programId,
-  instructions: {
-    swap: jupiterAbi.instructions.swap,
-  },
+const stream = solanaPortalSource({
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+  outputs: solanaInstructionDecoder({
+    range: { from: 250000000 },
+    programId: jupiterAbi.programId,
+    instructions: {
+      swap: jupiterAbi.instructions.swap,
+    },
+  }),
 });
 
 // TypeScript will infer the correct type
-for await (const { data } of source.pipe(decoder)) {
+for await (const { data } of stream) {
   data.swap; // AbiDecodeInstruction<typeof jupiterAbi.instructions.swap>[]
 }
 ```
@@ -55,9 +58,7 @@ for await (const { data } of source.pipe(decoder)) {
 Data returned from the Portal source. The structure contains blocks with fields based on your query selection.
 
 ```ts
-type SolanaPortalData<F extends FieldSelection> = {
-  blocks: solana.Block<F>[];
-}
+type SolanaPortalData<F extends FieldSelection> = solana.Block<F>[]
 ```
 
 ### SolanaTransformer
@@ -144,17 +145,6 @@ Chain a transformer.
 source.pipe(transformer);
 ```
 
-### pipeComposite
-
-Chain multiple transformers.
-
-```ts
-source.pipeComposite({
-  orcaSwaps: transformer1,
-  raydiumSwaps: transformer2,
-});
-```
-
 ### pipeTo
 
 Connect to a target.
@@ -186,10 +176,10 @@ import {
 
 | Function | Returns | Description |
 |----------|---------|-------------|
-| `getInstructionD1(instruction)` | 4 hex chars (2 bytes) | Extract 1-byte discriminator |
-| `getInstructionD2(instruction)` | 8 hex chars (4 bytes) | Extract 2-byte discriminator |
-| `getInstructionD4(instruction)` | 14 hex chars (7 bytes) | Extract 4-byte discriminator |
-| `getInstructionD8(instruction)` | 18 hex chars (9 bytes) | Extract 8-byte discriminator |
+| `getInstructionD1(instruction)` | 4 hex chars | Extract 2-byte discriminator |
+| `getInstructionD2(instruction)` | 8 hex chars | Extract 4-byte discriminator |
+| `getInstructionD4(instruction)` | 14 hex chars | Extract 7-byte discriminator |
+| `getInstructionD8(instruction)` | 18 hex chars | Extract 9-byte discriminator |
 
 ## Complete Type Example
 

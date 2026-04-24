@@ -1,0 +1,157 @@
+---
+title: "Postgres via Drizzle"
+description: "Store pipe output in PostgreSQL using Drizzle ORM"
+---
+
+Install Drizzle ORM and the PostgreSQL driver:
+
+```bash
+npm install drizzle-orm pg
+npm install -D drizzle-kit @types/pg
+```
+
+At a glance, the pipeline looks like this:
+
+```ts
+await solanaPortalSource({ ... }).pipeTo(
+  drizzleTarget({
+    db: drizzle('postgresql://...'),
+    tables: [swapsTable],
+    onData: async ({ tx, data }) => {
+      for (const batch of batchForInsert(data.swap)) {
+        await tx.insert(swapsTable).values(batch.map(...))
+      }
+    },
+  }),
+)
+```
+
+
+## Schema
+
+Define your tables with Drizzle ORM. Every table needs a primary key, and every table written to in [`onData`](#ondata) must appear in [`tables`](#tables).
+
+```ts
+import { bigint, integer, pgTable, primaryKey, varchar } from 'drizzle-orm/pg-core'
+
+const swapsTable = pgTable('swaps', {
+  slot:             bigint({ mode: 'bigint' }).notNull(),
+  instructionIndex: integer().notNull(),
+  programId:        varchar().notNull(),
+}, (t) => [primaryKey({ columns: [t.slot, t.instructionIndex] })])
+```
+
+
+## `onData` and `batchForInsert`
+
+`onData` runs inside a serializable transaction. Use `batchForInsert` to split data arrays into chunks that fit within PostgreSQL's 32,767-parameter limit — chunk size is calculated automatically from the number of columns:
+
+```ts
+import { batchForInsert, drizzleTarget } from '@subsquid/pipes/targets/drizzle/node-postgres'
+
+onData: async ({ tx, data }) => {
+  for (const batch of batchForInsert(data.swap)) {
+    await tx.insert(swapsTable).values(
+      batch.map((d) => ({
+        slot:             BigInt(d.block.slot),
+        instructionIndex: d.instruction.instructionIndex,
+        programId:        d.programId,
+      })),
+    )
+  }
+}
+```
+
+
+Pass an explicit second argument to `batchForInsert` to cap chunk size:
+
+```ts
+for (const batch of batchForInsert(data.transfers, 100)) { ... }
+```
+
+## `tables`
+
+Every table written to in `onData` must be listed in `tables`. At startup, the target installs PostgreSQL trigger functions on these tables to track row-level changes for automatic fork handling. Inserting into an unlisted table throws at runtime.
+
+## Schema migrations
+
+Use [Drizzle Kit](https://orm.drizzle.team/docs/kit-overview) to generate and apply migrations:
+
+```bash
+npx drizzle-kit generate
+npx drizzle-kit migrate
+```
+
+Alternatively, run migrations automatically on startup via `onStart`:
+
+```ts
+import { migrate } from 'drizzle-orm/node-postgres/migrator'
+
+drizzleTarget({
+  db,
+  tables: [...],
+  onStart: async ({ db }) => {
+    await migrate(db, { migrationsFolder: './drizzle' })
+  },
+  onData: async ({ tx, data }) => { ... },
+})
+```
+
+## Rollback handling
+
+Fork handling is fully automatic. Each batch runs inside a transaction that snapshots row-level changes. When the stream detects a fork, the target replays those snapshots in reverse to restore the pre-fork state.
+
+Use `onBeforeRollback` and `onAfterRollback` to run custom logic around a rollback. Both callbacks receive the Drizzle transaction and the `cursor` (`BlockCursor`) to which state was rolled back:
+
+```ts
+drizzleTarget({
+  db,
+  tables: [...],
+  onBeforeRollback: async ({ tx, cursor }) => { /* e.g. log or acquire an external lock */ },
+  onAfterRollback:  async ({ tx, cursor }) => { /* e.g. invalidate a cache */ },
+  onData: async ({ tx, data }) => { ... },
+})
+```
+
+## Complete example
+
+```ts expandable
+import { solanaInstructionDecoder, solanaPortalSource } from '@subsquid/pipes/solana'
+import { batchForInsert, drizzleTarget } from '@subsquid/pipes/targets/drizzle/node-postgres'
+import { drizzle } from 'drizzle-orm/node-postgres'
+import { bigint, integer, pgTable, primaryKey, varchar } from 'drizzle-orm/pg-core'
+
+const swapsTable = pgTable('swaps', {
+  slot:             bigint({ mode: 'bigint' }).notNull(),
+  instructionIndex: integer().notNull(),
+  programId:        varchar().notNull(),
+}, (t) => [primaryKey({ columns: [t.slot, t.instructionIndex] })])
+
+await solanaPortalSource({
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+  outputs: solanaInstructionDecoder({
+    range: { from: '340000000' },
+    programId: '...',
+    instructions: { swap: swapInstruction },
+  }),
+}).pipeTo(
+  drizzleTarget({
+    db: drizzle('postgresql://postgres:postgres@localhost:5432/postgres'),
+    tables: [swapsTable],
+    onData: async ({ tx, data }) => {
+      for (const batch of batchForInsert(data.swap)) {
+        await tx.insert(swapsTable).values(
+          batch.map((d) => ({
+            slot:             BigInt(d.block.slot),
+            instructionIndex: d.instruction.instructionIndex,
+            programId:        d.programId,
+          })),
+        )
+      }
+    },
+  }),
+)
+```
+
+
+See the [drizzleTarget reference](../../../../reference/basic-components/target/postgres-drizzle) for the full API.

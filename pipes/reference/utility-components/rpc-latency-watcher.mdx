@@ -1,5 +1,5 @@
 ---
-title: "RPC Latency Watcher"
+title: "solanaRpcLatencyWatcher"
 description: "Monitor RPC latency and compare with Portal performance"
 ---
 
@@ -52,7 +52,7 @@ import { solanaPortalSource, solanaRpcLatencyWatcher } from '@subsquid/pipes/sol
 
 const stream = solanaPortalSource({
   portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
-  query: { from: 'latest' },
+  outputs: new SolanaQueryBuilder().addFields({ block: { number: true, hash: true, timestamp: true } }).includeAllBlocks({ from: 'latest' }).build(),
 }).pipe(
   solanaRpcLatencyWatcher({
     rpcUrl: ['https://api.mainnet-beta.solana.com'],
@@ -86,7 +86,7 @@ Monitor multiple RPC providers simultaneously:
 ```ts
 const stream = solanaPortalSource({
   portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
-  query: { from: 'latest' },
+  outputs: new SolanaQueryBuilder().addFields({ block: { number: true, hash: true, timestamp: true } }).includeAllBlocks({ from: 'latest' }).build(),
 }).pipe(
   solanaRpcLatencyWatcher({
     rpcUrl: [
@@ -104,7 +104,7 @@ Export latency data to Prometheus or other monitoring systems:
 ```ts
 const stream = solanaPortalSource({
   portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
-  query: { from: 'latest' },
+  outputs: new SolanaQueryBuilder().addFields({ block: { number: true, hash: true, timestamp: true } }).includeAllBlocks({ from: 'latest' }).build(),
 }).pipe(
   solanaRpcLatencyWatcher({
     rpcUrl: ['https://api.mainnet-beta.solana.com'],
@@ -147,7 +147,7 @@ const latencyCounter = new Counter({
 
 const stream = solanaPortalSource({
   portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
-  query: { from: 'latest' },
+  outputs: new SolanaQueryBuilder().addFields({ block: { number: true, hash: true, timestamp: true } }).includeAllBlocks({ from: 'latest' }).build(),
 }).pipe(
   solanaRpcLatencyWatcher({
     rpcUrl: ['https://api.mainnet-beta.solana.com'],

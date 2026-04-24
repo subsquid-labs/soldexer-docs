@@ -1,0 +1,86 @@
+---
+title: "Metrics"
+description: "Track custom Prometheus metrics in Solana pipes"
+---
+
+Pipes SDK can expose a Prometheus-compatible metrics server. You can customize it to add counters, gauges, histograms, and summaries.
+
+```ts
+import { solanaInstructionDecoder, solanaPortalStream } from "@subsquid/pipes/solana";
+import { metricsServer } from "@subsquid/pipes/metrics/node";
+
+import * as orcaWhirlpool from './abi/orca_whirlpool/index.js'
+
+async function main() {
+  const stream = solanaPortalStream({
+    id: 'solana-decoder',
+    portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+    outputs: solanaInstructionDecoder({
+      range: {
+        from: 'latest'
+      },
+      programId: orcaWhirlpool.programId,
+      instructions: {
+        swap: orcaWhirlpool.instructions.swap,
+        swapV2: orcaWhirlpool.instructions.swapV2,
+      },
+    }),
+    metrics: metricsServer({
+      port: 9090
+    }), // equivalent to metricsServer(), as 9090 is the default port
+  })
+
+  for await (const { data, ctx } of stream) {
+    // Add custom counter metric
+    ctx.metrics
+      .counter({
+        name: "my_swaps_counter",
+        help: "Number of processed swaps",
+      })
+      .inc(data.swap.length + data.swapV2.length);
+  }
+}
+
+void main()
+```
+<Check>
+Access metrics at `http://localhost:9090/metrics` to verify they're being exposed correctly.
+```
+# HELP my_swaps_counter Number of processed swaps
+# TYPE my_swaps_counter counter
+my_swaps_counter 218598
+```
+</Check>
+
+
+
+<Tip>
+Use Grafana dashboards to visualize block processing rate, error rates, and latency trends from your Prometheus metrics.
+</Tip>
+
+## Available metric types
+
+You can create different types of Prometheus metrics:
+
+```ts
+for await (const { data, ctx } of stream) {
+  // Counter - monotonically increasing value
+  ctx.metrics.counter({ name: "events_total", help: "Total events" }).inc();
+
+  // Gauge - value that can go up or down
+  ctx.metrics
+    .gauge({ name: "queue_size", help: "Current queue size" })
+    .set(queueSize);
+
+  // Histogram - observations with configurable buckets
+  ctx.metrics
+    .histogram({ name: "batch_size", help: "Batch size distribution" })
+    .observe(data.transfers.length);
+}
+```
+
+<Info>
+Expose metrics with `metricsServer()` on your source, then visualize them with [Pipes UI](../basic-development/observing-debugging-pipes-ui).
+</Info>
+
+See the [Profiling](./profiling) guide for the built-in per-batch profiler exposed on the same metrics endpoint.

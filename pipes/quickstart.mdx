@@ -73,10 +73,10 @@ const custom = solanaInstructionDecoder({
 export async function main() {
   await solanaPortalSource({
     portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
-  })
-    .pipeComposite({
+    outputs: {
       custom,
-    })
+    },
+  })
     .pipeTo(
       drizzleTarget({
         db: drizzle(env.DB_CONNECTION_STR),

@@ -5,29 +5,98 @@ description: "API reference for createTransformer and pipe transforms"
 
 ## createTransformer
 
-Transform data in pipes.
+Construct a whole-pipe transformer.
 
 ```ts
-createTransformer<I, O>(config: TransformerConfig<I, O>): Transformer<I, O>
+createTransformer<I, O>(config: TransformerOptions<I, O>): Transformer<I, O>
 ```
 
-**Parameters:**
+**Config fields:**
 
-- `transform`: Transform function `async (data: I, ctx) => O` (required)
-- `query`: Query callback `({queryBuilder, portal, logger}) => void` (optional)
+- `transform`: (required) `(data: I, ctx: BatchContext) => O | Promise<O>`. Called once per batch.
+- `start`: (optional) `(ctx: StartCtx) => void | Promise<void>`. Called once when the pipe starts. Use this to load state, warm up caches, or query the portal for historical data before the main stream begins.
+- `stop`: (optional) `(ctx: StopCtx) => void | Promise<void>`. Called once when the pipe stops.
+- `fork`: (optional) `(cursor: BlockCursor, ctx: Ctx) => void | Promise<void>`. Called before the next batch whenever the source detects a chain reorg. `cursor` identifies the last safe slot. See [Fork handling](../../guides/architecture-deep-dives/fork-handling).
+- `profiler`: (optional) `{ name: string; hidden?: boolean }`. Overrides the transformer's node name in the [profiler](../../guides/advanced-topics/profiling) tree.
 
 **Example:**
 
 ```ts
 const transformer = createTransformer({
-  query: ({ queryBuilder }) => {
-    queryBuilder.addInstruction({
-      request: { programId: ["whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"] },
-      range: { from: 200000000 },
-    });
+  transform: async (data, ctx) => {
+    ctx.logger.info({ slot: ctx.stream.state.current.number }, 'batch')
+    return data.map((b) => b.instructions)
   },
-  transform: async (data) => {
-    return data.blocks.map((b) => b.instructions);
-  },
-});
+})
 ```
+
+
+## Context variables
+
+Each callback receives a context object. The fields differ by callback.
+
+### `transform(data, ctx: BatchContext)`
+
+`ctx` is the full per-batch context. Fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Pipeline ID — the `id` passed to `solanaPortalStream()`. |
+| `logger` | `Logger` | Pino-compatible logger scoped to this batch. Defaults to the source-level logger. |
+| `metrics` | `Metrics` | Prometheus metrics registry. Use `ctx.metrics.counter()`, `.gauge()`, `.histogram()`, `.summary()` to register and update custom metrics. See [Metrics](../../guides/advanced-topics/metrics). |
+| `profiler` | `Profiler` | Open a span with `ctx.profiler.start('label')`. See [Profiling](../../guides/advanced-topics/profiling). |
+| `stream` | `BatchStreamContext` | Per-stream state (see below). |
+| `batch` | `BatchMetadata` | Per-batch volume info (see below). |
+
+#### `ctx.stream: BatchStreamContext`
+
+| Field | Type | Description |
+|---|---|---|
+| `dataset` | `ApiDataset` | Dataset metadata returned by the portal (chain name, genesis, tier). |
+| `head.finalized` | `BlockCursor \| undefined` | Current finalized head known to the portal, if advertised. |
+| `head.latest` | `BlockCursor \| undefined` | Current unfinalized head. |
+| `state.initial` | `number` | First slot the stream was configured to read. |
+| `state.last` | `number` | Last slot the stream intends to read (often `Infinity`). |
+| `state.current` | `BlockCursor` | Latest slot in this batch. Cursor has `{ number, hash?, timestamp? }`. |
+| `state.rollbackChain` | `BlockCursor[]` | Unfinalized-chain tail — cursors the stream will need to roll back if a fork is detected. |
+| `progress` | `ProgressEvent['progress']` | Progress metrics when `progress` is configured on the source; otherwise undefined. |
+| `query` | `{ url, hash, raw }` | Debug info for the portal query feeding this batch. |
+
+#### `ctx.batch: BatchMetadata`
+
+| Field | Type | Description |
+|---|---|---|
+| `blocksCount` | `number` | Number of slots in this batch. |
+| `bytesSize` | `number` | Compressed payload size received from the portal. |
+| `requests` | `Record<number, number>` | Map of HTTP status code → number of responses that produced this batch. |
+| `lastBlockReceivedAt` | `Date` | Wall-clock time the last block was received. |
+
+### `start(ctx: StartCtx)`
+
+Fired once, before any batch. Use to warm up caches or run one-off queries.
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Pipeline ID. |
+| `logger` | `Logger` | Same as in `BatchContext`. |
+| `metrics` | `Metrics` | Same as in `BatchContext`. |
+| `portal` | `PortalClient` | Live portal client. Use `portal.getStream(query)` for warm-up reads. |
+| `state.initial` | `number` | First slot the stream was configured to read. |
+| `state.current` | `BlockCursor \| undefined` | Cursor persisted by the previous run, if any. `undefined` on a fresh start. |
+
+### `fork(cursor, ctx: Ctx)`
+
+Fired before the next batch whenever a reorg is detected. `cursor` is the last slot to keep; drop state produced for anything after it.
+
+| Field | Type | Description |
+|---|---|---|
+| `logger` | `Logger` | Same as in `BatchContext`. |
+| `profiler` | `Profiler` | Same as in `BatchContext`. |
+
+### `stop(ctx: StopCtx)`
+
+Fired once when the pipe stops.
+
+| Field | Type | Description |
+|---|---|---|
+| `logger` | `Logger` | Same as in `BatchContext`. |

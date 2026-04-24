@@ -1,0 +1,63 @@
+---
+title: "drizzleTarget"
+description: "PostgreSQL target for Pipes SDK via Drizzle ORM"
+---
+
+See the [Postgres via Drizzle guide](../../../guides/basic-development/targets/postgres-drizzle) for usage examples and setup instructions.
+
+```ts
+import { drizzleTarget } from '@subsquid/pipes/targets/drizzle/node-postgres'
+```
+
+## `drizzleTarget`
+
+```ts
+drizzleTarget<T>({
+  db: NodePgDatabase,
+  tables: Table[] | Record<string, Table>,
+  onStart?: (ctx: { db: NodePgDatabase }) => Promise<unknown>,
+  onData: (ctx: { tx: Transaction; data: T; ctx: Ctx }) => Promise<unknown>,
+  onBeforeRollback?: (ctx: { tx: Transaction; cursor: BlockCursor }) => Promise<unknown> | unknown,
+  onAfterRollback?: (ctx: { tx: Transaction; cursor: BlockCursor }) => Promise<unknown> | unknown,
+  settings?: {
+    state?: StateOptions
+    transaction?: {
+      isolationLevel?: 'read uncommitted' | 'read committed' | 'repeatable read' | 'serializable'
+    }
+  },
+})
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `db` | Yes | Drizzle `NodePgDatabase` instance. Must expose `$client` (a `pg` Pool or Client). |
+| `tables` | Yes | Tables tracked for automatic fork rollback. All tables written to in `onData` must appear here. |
+| `onStart` | No | Runs once before processing starts. Receives `{ db }`. |
+| `onData` | Yes | Called for each batch inside a serializable transaction. |
+| `onBeforeRollback` | No | Called inside the rollback transaction before snapshots are replayed. |
+| `onAfterRollback` | No | Called inside the rollback transaction after snapshots are replayed. |
+| `settings.state` | No | Configuration for the internal cursor state table. See `StateOptions` below. |
+| `settings.transaction.isolationLevel` | No | Transaction isolation level. Defaults to `'serializable'`. |
+
+**`StateOptions`:**
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `schema` | `'public'` | PostgreSQL schema for the state table. |
+| `table` | `'sync'` | Name of the state table. |
+| `id` | `'stream'` | Stream identifier within the state table. |
+| `unfinalizedBlocksRetention` | `1000` | Number of unfinalized blocks retained in state for rollback purposes. |
+
+## `batchForInsert`
+
+```ts
+import { batchForInsert } from '@subsquid/pipes/targets/drizzle/node-postgres'
+```
+
+```ts
+function batchForInsert<T>(data: readonly T[], size?: number): Generator<T[]>
+```
+
+Splits an array into chunks that fit within PostgreSQL's 32,767-parameter limit. Chunk size is `Math.floor(32767 / columnsPerRecord)` by default. Pass `size` to set a smaller cap; values exceeding the computed maximum are silently clamped.
+
+`chunk` is a deprecated alias for `batchForInsert`.
