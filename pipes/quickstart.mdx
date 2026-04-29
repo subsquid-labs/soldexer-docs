@@ -119,7 +119,7 @@ const custom = solanaInstructionDecoder({
 The decoder asks the Portal for `swap` instructions on the Orca Whirlpool program. `enrichEvents` (from `src/utils/`) reshapes each decoded instruction into a row matching the Drizzle table. See [solanaInstructionDecoder](./reference/utility-components/instruction-decoder) and [Transformer](./reference/basic-components/transformer).
 
 
-The `main()` function wires the decoder to a [drizzleTarget](./reference/basic-components/target/drizzle-target):
+The `main()` function wires the decoder to a [drizzleTarget](./reference/basic-components/target/postgres-drizzle):
 
 ```ts
 export async function main() {
