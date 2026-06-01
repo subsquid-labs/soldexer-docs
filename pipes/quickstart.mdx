@@ -18,7 +18,7 @@ Pair the skill with one or both MCP servers so the agent can read live data and 
 - [Portal MCP server](/en/ai/mcp-server) — 29 tools for querying blocks, transactions, logs, instructions, and analytics across 225+ datasets. No API key.
 - [Documentation MCP server](/en/ai/mcp-server-docs) — search and retrieve these docs from inside the agent.
 
-If you'd rather feed docs into a model directly, the static [`llms.txt`](/llms.txt) (index) and [`llms-full.txt`](/llms-full.txt) (full content) files are kept in sync with the site. See the [AI Development overview](/en/ai/ai-development) for the full menu.
+If you'd rather feed docs into a model directly, the static [`llms.txt`](https://docs.sqd.dev/llms.txt) (index) and [`llms-full.txt`](https://docs.sqd.dev/llms-full.txt) (full content) files are kept in sync with the site. See the [AI Development overview](/en/ai/ai-development) for the full menu.
 
 # Scaffolding with Pipes CLI
 
@@ -140,7 +140,7 @@ const custom = solanaInstructionDecoder({
 }).pipe(enrichEvents)
 ```
 
-The decoder asks the Portal for `swap` instructions on the Orca Whirlpool program. `enrichEvents` (from `src/utils/`) reshapes each decoded instruction into a row matching the Drizzle table. See the [Pipe anatomy](./guides/basic-development/anatomy) and [Handling contract events](./guides/basic-development/handling-events) guides for more info on `evmDecoder()`.
+The decoder asks the Portal for `swap` instructions on the Orca Whirlpool program. `enrichEvents` (from `src/utils/`) reshapes each decoded instruction into a row matching the Drizzle table. See the [Pipe anatomy](./guides/basic-development/anatomy) and [Handling instructions](./guides/basic-development/handling-instructions) guides for more info on `instructionDecoder()`.
 
 The `main()` function wires the decoder to a [drizzleTarget](./reference/basic-components/target/postgres-drizzle):
 

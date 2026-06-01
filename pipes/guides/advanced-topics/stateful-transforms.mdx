@@ -264,7 +264,7 @@ start: async ({ state }) => {
 
 ---
 
-## D. Postgres/Drizzle target
+## D. Postgres/Drizzle target {#d-postgresdrizzle-target}
 
 When your target is already Postgres, the `drizzleTarget` can commit transformer state and output rows inside the **same serializable transaction** as the cursor save. This gives the strongest atomicity guarantees of any approach: a crash between `transform()` and the cursor save is impossible because both commit together.
 

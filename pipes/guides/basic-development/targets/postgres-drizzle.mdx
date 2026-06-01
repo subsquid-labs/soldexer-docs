@@ -42,7 +42,7 @@ const swapsTable = pgTable('swaps', {
 ```
 
 
-## `onData` and `batchForInsert`
+## `onData` and `batchForInsert` {#ondata}
 
 `onData` runs inside a serializable transaction. Use `batchForInsert` to split data arrays into chunks that fit within PostgreSQL's 32,767-parameter limit — chunk size is calculated automatically from the number of columns:
 

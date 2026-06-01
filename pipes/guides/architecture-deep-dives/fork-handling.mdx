@@ -12,7 +12,7 @@ Fork handling is only needed for real-time streams (`range.from: 'latest'`). His
 The SDK provides two patterns for consuming a stream. Both use the same state-tracking logic; they differ in how the fork signal is delivered.
 
 <Note>
-If your pipeline includes a [stateful transformer](../advanced-topics/stateful-transforms#fork-callbacks-in-stateful-transformers), it must also implement a `fork` callback to roll back its own state in lockstep with the target.
+If your pipeline includes a [stateful transformer](../advanced-topics/stateful-transforms#fork-callbacks-and-crash-recovery), it must also implement a `fork` callback to roll back its own state in lockstep with the target.
 </Note>
 
 <Tabs>
