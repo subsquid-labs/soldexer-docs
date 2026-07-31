@@ -21,18 +21,18 @@ Pipes UI is a local web dashboard that connects to a running pipe and visualises
 Attach [`metricsServer()`](../advanced-topics/metrics) to the source. Listens on `localhost:9090` by default.
 
 ```ts
-import { evmPortalStream, evmDecoder, commonAbis } from '@subsquid/pipes/evm'
+import { evmPortalStream, evmEventDecoder, commonAbis } from '@subsquid/pipes/evm'
 import { metricsServer } from '@subsquid/pipes/metrics/node'
 
 evmPortalStream({
   id: 'my-pipe',                       // shows up in the dashboard as the pipe name
   portal: 'https://portal.sqd.dev/datasets/ethereum-mainnet',
-  outputs: evmDecoder({
+  outputs: evmEventDecoder({
     profiler: { name: 'transfers' },   // labels this span in the profiler tree
     range: { from: 'latest' },
     events: { transfers: commonAbis.erc20.events.Transfer },
   }),
-  metrics: metricsServer(),            // exposes /metrics, /stats, /profiler, /health on :9090
+  metrics: metricsServer(),            // exposes /metrics, /stats, /profiler, /preview/transformation, /health on :9090
 })
 ```
 
@@ -43,7 +43,7 @@ Start the pipe as usual (`ts-node`, `bun`, compiled JS, etc.).
 In a second terminal:
 
 ```bash
-npx @subsquid/pipes-ui@alpha
+npx @subsquid/pipes-ui@beta
 ```
 
 The UI serves on `http://localhost:3000` and polls the metrics server at `http://localhost:9090`. Open the URL in a browser — the page auto-refreshes once the pipe starts producing batches.

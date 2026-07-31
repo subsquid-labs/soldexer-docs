@@ -17,7 +17,7 @@ solanaInstructionDecoder<T>(config: SolanaInstructionDecoderConfig<T>): Transfor
 - `programId`: Program address(es) `string | string[]` (required)
 - `instructions`: Map of instruction names to ABI instruction objects (required)
 - `profiler`: Profiler config shard that'll be used for labeling the transformer in profiling data `{ name: string }` (optional)
-- `onError`: Error handler `(ctx: BatchCtx, error: any) => unknown | Promise<unknown>` (optional)
+- `onError`: Error handler `(ctx: BatchContext, error: any) => unknown | Promise<unknown>` (optional)
 
 **Example:**
 
@@ -50,14 +50,14 @@ Each entry in the output arrays is a `DecodedInstruction` object:
 
 ## Instruction discriminators
 
-Instructions are filtered by discriminators (prefix bytes of instruction data). The discriminator names indicate the number of hex characters returned:
+Instructions are filtered by discriminators (prefix bytes of instruction data). The discriminator name indicates how many leading bytes of the instruction data it covers:
 
-| Name | Hex Characters | Bytes | Common Use |
-|------|----------------|-------|------------|
-| `d1` | 4 chars | 2 bytes | Simple programs |
-| `d2` | 8 chars | 4 bytes | Some native programs |
-| `d4` | 14 chars | 7 bytes | Custom programs |
-| `d8` | 18 chars | 9 bytes | Anchor programs (most common) |
+| Name | Bytes | Hex string length (with `0x` prefix) | Common Use |
+|------|-------|--------------------------------------|------------|
+| `d1` | 1 byte | 4 chars | Simple programs |
+| `d2` | 2 bytes | 6 chars | Some native programs |
+| `d4` | 4 bytes | 10 chars | Custom programs |
+| `d8` | 8 bytes | 18 chars | Anchor programs (most common) |
 
 The decoder automatically extracts the appropriate discriminator from the ABI instruction definition.
 

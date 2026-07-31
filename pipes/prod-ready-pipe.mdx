@@ -8,7 +8,7 @@ sidebarTitle: "Production Pipe Example"
 
 The [pipes-sqdgn-dex-example](https://github.com/subsquid-labs/pipes-sqdgn-dex-example) repo is a full-featured pipe that indexes DEX liquidity events (swaps, mints, burns, syncs, etc.) from Base mainnet for Uniswap V2/V3/V4, Aerodrome Basic/Slipstream, and other forks. It uses Pipes SDK to pull data from a Subsquid Portal, decode EVM logs, transform them into a unified schema, and write to ClickHouse. For what Pipes SDK is and when to use it, see [Why Pipes SDK](/en/sdk/pipes-sdk/solana/why-pipes-sdk).
 
-The entrypoint is [`pipes/evm/liquidity/cli.ts`](https://github.com/subsquid-labs/pipes-sqdgn-dex-example/blob/master/pipes/evm/liquidity/cli.ts). The pipeline is: **Portal source → composite decoders → transform pipe → ClickHouse target**.
+The entrypoint is [`pipes/evm/liquidity/cli.ts`](https://github.com/subsquid-labs/pipes-sqdgn-dex-example/blob/master/pipes/evm/liquidity/cli.ts). The pipeline is: **Portal stream → composite decoders → transform pipe → ClickHouse target**.
 
 ## 1. Config and ClickHouse
 
@@ -22,12 +22,12 @@ await ensureTables(client, __dirname, config.network, databaseName);
 
 See [`pipes/evm/config.ts`](https://github.com/subsquid-labs/pipes-sqdgn-dex-example/blob/master/pipes/evm/config.ts) for network/portal URLs and [`liquidity.sql`](https://github.com/subsquid-labs/pipes-sqdgn-dex-example/blob/master/pipes/evm/liquidity/liquidity.sql) for schema.
 
-## 2. Portal source
+## 2. Portal stream
 
 [`portal_source.ts`](https://github.com/subsquid-labs/pipes-sqdgn-dex-example/blob/master/pipes/evm/liquidity/portal_source.ts) wraps the EVM Portal with optional metrics and a SQLite cache so responses can be reused:
 
 ```typescript
-evmPortalSource({
+evmPortalStream({
   portal: config.portal.url,
   metrics: metricsPort ? metricsServer({ port: metricsPort }) : undefined,
   cache: portalSqliteCache({ path: portalCacheDbPath }),
@@ -36,17 +36,17 @@ evmPortalSource({
 
 ## 3. Composite decoders
 
-[`evm_decoder.ts`](https://github.com/subsquid-labs/pipes-sqdgn-dex-example/blob/master/pipes/evm/liquidity/evm_decoder.ts) defines one decoder per protocol (Uniswap V2/V3/V4, Aerodrome Basic/Slipstream). Each uses `evmDecoder` with `factory()` + a factory SQLite DB to discover pools from factory events, then subscribes to swap/mint/burn/sync/collect (and protocol-specific) events:
+[`evm_decoder.ts`](https://github.com/subsquid-labs/pipes-sqdgn-dex-example/blob/master/pipes/evm/liquidity/evm_decoder.ts) defines one decoder per protocol (Uniswap V2/V3/V4, Aerodrome Basic/Slipstream). Each uses `evmEventDecoder` with `contractFactory()` + a factory SQLite store to discover pools from factory events, then subscribes to swap/mint/burn/sync/collect (and protocol-specific) events:
 
 ```typescript
-uniswapV2: evmDecoder({
+uniswapV2: evmEventDecoder({
   profiler,
   range: { from: blockFrom },
-  contracts: factory({
+  contracts: contractFactory({
     address: getFactoryAddressesByProtocol(network, 'uniswap_v2'),
     event: UniswapV2FactoryEvents.PairCreated,
     database,
-    parameter: 'pair',
+    childAddressField: 'pair',
   }),
   events: {
     swaps: UniswapV2PairEvents.Swap,
@@ -57,7 +57,7 @@ uniswapV2: evmDecoder({
 }),
 ```
 
-The CLI merges all decoders with `pipeComposite({ ...decoders })` so the Portal stream is decoded into multiple typed streams (one per protocol).
+The CLI merges all decoders into a named `outputs` record (`outputs: { ...decoders }`) so the Portal stream is decoded into multiple typed streams (one per protocol).
 
 ## 4. Transform pipe
 
@@ -98,10 +98,12 @@ This approach is commonly used for stateful data transforms / aggregations at SQ
 The full pipeline in `cli.ts`:
 
 ```typescript
-await portalSource
-  .pipeComposite({ ...decoders })
+await evmPortalStream({
+  // portal, cache, metrics, ...
+  outputs: { ...decoders },
+})
   .pipe(createPipeFunc(config.network, poolMetadataStorage))
   .pipeTo(chTarget);
 ```
 
-Data flows from the Portal (with cache and optional metrics) through the composite decoders, then through the liquidity transform, and finally into ClickHouse. For run instructions and env vars, see the repo [README](https://github.com/subsquid-labs/pipes-sqdgn-dex-example#readme).
+Data flows from the Portal (with cache and optional metrics) through the named decoder outputs, then through the liquidity transform, and finally into ClickHouse. For run instructions and env vars, see the repo [README](https://github.com/subsquid-labs/pipes-sqdgn-dex-example#readme).

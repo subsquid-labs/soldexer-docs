@@ -50,7 +50,7 @@ Both built-in targets use it to isolate state records, so multiple streams can s
 clickhouseTarget({
   client,
   settings: {
-    id: 'my-stream',      // overrides solanaPortalStream id (default: 'stream')
+    id: 'my-stream',      // explicit cursor key; defaults to the solanaPortalStream id
     table: 'sync',        // state table name (default: 'sync')
     database: 'default',  // ClickHouse database
     maxRows: 10_000,      // cursor rows to keep per stream id (default: 10,000)
@@ -62,8 +62,8 @@ clickhouseTarget({
 
 **`onRollback` is called in two situations:**
 
-- `type: 'offset_check'` — on every startup when a cursor exists. ClickHouse is non-transactional: a crash between `onData` and the cursor save leaves rows newer than the saved cursor. Delete them here. See [non-transactional databases](./fork-handling#4-state-rollback-atomicity).
-- `type: 'blockchain_fork'` — when the portal signals a reorg. The rollback cursor is resolved automatically from stored history; your callback only needs to delete rows after `safeCursor.number`.
+- `reason: 'recovery'` — on every startup when a cursor exists. ClickHouse is non-transactional: a crash between `onData` and the cursor save leaves rows newer than the saved cursor. Delete them here. See [non-transactional databases](./fork-handling#4-state-rollback-atomicity).
+- `reason: 'fork'` — when the portal signals a reorg. The rollback cursor is resolved automatically from stored history; your callback only needs to delete rows after `safeCursor.number`.
 
 The same implementation typically serves both:
 

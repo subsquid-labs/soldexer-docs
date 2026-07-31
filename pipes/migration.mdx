@@ -1,0 +1,178 @@
+---
+title: "Migrate to 1.0"
+description: "Update a pipe from @subsquid/pipes 0.1.0-beta.* or 1.0.0-alpha.* to 1.0"
+sidebarTitle: "Migrating to 1.0"
+---
+
+`@subsquid/pipes` 1.0 is a major release: every rename is **hard** — the old names are removed, with no deprecated aliases — so the TypeScript compiler will point you at most of the changes. A few changes are silent, though, and those are called out below.
+
+Pick the tab matching the version in your `package.json`:
+
+- **0.1.0-beta.\*** — the previous 0.1.x line. Most existing pipes are here.
+- **1.0.0-alpha.\*** — the 1.0 preview line. The pipeline structure already matches 1.0; what remains is mostly the naming overhaul that landed late in the alpha series.
+
+The 1.0 line ships under the npm `beta` tag, so install it explicitly:
+
+```bash
+npm i @subsquid/pipes@beta
+```
+
+The exhaustive step-by-step list (including rarely-used types) lives in the package's [MIGRATION.md](https://github.com/subsquid-labs/pipes-sdk/blob/main/packages/pipes/MIGRATION.md).
+
+<Tabs>
+<Tab title="From 0.1.0-beta.x">
+
+## 1. Decoders move into `outputs`
+
+Portal sources became portal [streams](./reference/basic-components/source), and `.pipe(decoder)` / `.pipeComposite({...})` on the source are gone. Pass decoders through the required `outputs` option instead:
+
+```ts
+// before
+const stream = solanaPortalSource({
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+}).pipe(
+  createSolanaInstructionDecoder({
+    range: { from: 'latest' },
+    instructions: { swaps: orcaWhirlpool.instructions.swap },
+  }),
+)
+
+// after
+const stream = solanaPortalStream({
+  id: 'orca-swaps',
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+  outputs: solanaInstructionDecoder({
+    range: { from: 'latest' },
+    instructions: { swaps: orcaWhirlpool.instructions.swap },
+  }),
+})
+```
+
+
+What was `.pipeComposite({ ... })` is now a named record: `outputs: { transfers: ..., swaps: ... }`. The `data` shape is unchanged. See [Pipe anatomy](./guides/basic-development/anatomy) for the full 1.0 pipe structure.
+
+## 2. Every stream needs an `id`
+
+The `id` shown above is now required: it must be globally unique, stable and non-empty. Targets use it as the cursor key to persist progress, and it scopes log lines and Prometheus labels. Calling `.pipeTo()` without one throws `DefaultPipeIdError` (E0001).
+
+Because cursors are now keyed by the `id` (previously a static `"stream"` key shared by every pipe), the first restart after upgrading migrates your stored cursor:
+
+| Target | What happens |
+|---|---|
+| ClickHouse, Postgres | Legacy `"stream"` cursor is re-keyed to the pipe `id` automatically (one-time, logged). |
+| BigQuery | No auto-migration — refuses to start with `ORPHAN_TRACKED_DATA`. Pin the legacy key: `settings: { state: { id: 'stream' } }`. |
+| Parquet | Rename the state file `_sqd_parquet_state.json` → `_sqd_parquet_state.<pipe-id>.json` before restarting. |
+
+If several pipes shared one offset table under the old default, pin explicit per-target ids **before** upgrading — see [Cursor management](./guides/architecture-deep-dives/cursor-management).
+
+## 3. Raw outputs are plain block arrays
+
+If you consume a stream without a decoder, `data` is now the block array itself — drop the `.blocks` accessor (`data.blocks.map(...)` → `data.map(...)`). This also applies inside custom transformers.
+
+## 4. Renames
+
+**Functions:**
+
+| Before | After |
+|---|---|
+| `evmPortalSource` / `createEvmPortalSource` | `evmPortalStream` |
+| `solanaPortalSource` / `createSolanaPortalSource` | `solanaPortalStream` |
+| `evmDecoder` | `evmEventDecoder` |
+| `createSolanaInstructionDecoder` | [`solanaInstructionDecoder`](./reference/utility-components/instruction-decoder) |
+| `factory` | `contractFactory` (option `parameter` → `childAddressField`) |
+| `factorySqliteDatabase` | `contractFactorySqliteStore` |
+| `chunk` | [`chunkForInsert`](./reference/basic-components/target/postgres-drizzle) |
+| `addLog` / `addTransaction` / `addInstruction` / … (query builders) | `addLogRequest` / `addTransactionRequest` / `addInstructionRequest` / … (`addFields` / `addRange` unchanged) |
+| `new EvmQueryBuilder()` / `new SolanaQueryBuilder()` | `evmQuery()` / `solanaQuery()` shorthands (classes still exported) |
+
+**Types:**
+
+| Before | After |
+|---|---|
+| `ResultOf<T>` | `OutputOf<T>` |
+| `BatchCtx` / `Ctx` | `BatchContext` / `HookContext` |
+| `RunConfig` | `PipeContext` |
+| `FactoryOptions` | `ContractFactoryOptions` |
+| `StartState` / `ProgressState` | `StartEvent` / `ProgressEvent` |
+| `PortalSource` | `PortalStream` |
+
+In the [runner](./guides/basic-development/dev-runner), `createDevRunner` is now `devRunner` and each pipe's `stream` field is now `handler`. In progress callbacks, `ProgressEvent` data is nested under `.progress`, and its `state` reads `from`/`to` instead of `initial`/`last`.
+
+## 5. Custom transformers and targets
+
+- A transformer's fork hook is renamed `fork` → `rollback` — it receives the already-resolved safe cursor and must undo internal state above it. See the [Transformer reference](./reference/basic-components/transformer).
+- A custom target's contract method is `fork(previousBlocks)` → `resolveFork(canonicalBlocks)` — it receives the portal's view of the canonical chain, finds the common ancestor, rolls back above it, and returns the resume cursor. See [createTarget](./reference/basic-components/target/create-target) and [Fork handling](./guides/architecture-deep-dives/fork-handling).
+- `query.build({ transform, fork })` no longer accepts transform options — build the query first, then chain: `.build().pipe({ transform, rollback })`.
+
+## 6. ClickHouse target
+
+The `onRollback` discriminator changed: `type: 'offset_check' | 'blockchain_fork'` → `reason: 'recovery' | 'fork'`, and the context carries `safeCursor` only (the `cursor` duplicate is gone). This does **not** surface as a compile error if you only destructure `store` — grep for the old values.
+
+`store.removeAllRows` is now engine-aware: cancel rows (`sign = -1`) on `CollapsingMergeTree`-family tables, a lightweight `DELETE` (ClickHouse ≥ 23.3) elsewhere, an explicit error on `Distributed` tables. See the [ClickHouse guide](./guides/basic-development/targets/clickhouse).
+
+## 7. Parquet target
+
+The `TIMESTAMP_MILLIS` column type is renamed `TIMESTAMP` (identical file format — only schemas change). New column types: `DATE`, `JSON`, `STRUCT`, `LIST`.
+
+## 8. Observability
+
+- Prometheus gauges: `sqd_current_block` → `sqd_processed_block`, `sqd_last_block` → `sqd_end_block` (the value is the end of the indexed range, not the chain head). Update dashboards and alerts.
+- The [metrics server](./reference/utility-components/metrics-server) now serves `GET /preview/transformation` (was `/exemplars/transformation`); the `/profiler` payload key `profilers` is now `profiles`.
+- Upgrade [Pipes UI](./guides/basic-development/pipes-ui) together with the SDK — older UI versions read endpoints that no longer exist.
+
+</Tab>
+<Tab title="From 1.0.0-alpha.x">
+
+Pipes built on the 1.0 alphas already use `outputs`, required `id`s, and per-pipe cursor keys. What remains is the naming overhaul that landed late in the alpha line, plus a few removals.
+
+<Warning>
+One change is invisible to the compiler: `FinalizationBuffer.resolveFork(blocks)` used to be the **pure** resolver; it now **resolves and drops** buffered rows (it is the old `buffer.fork()`). The pure variant lives on as `resolveForkCursor(blocks)`. If you called `resolveFork` for side-effect-free inspection, switch those calls to `resolveForkCursor`.
+</Warning>
+
+## 1. Hard renames
+
+| Alpha name | 1.0 name |
+|---|---|
+| `evmDecoder` | `evmEventDecoder` |
+| `batchForInsert` | [`chunkForInsert`](./reference/basic-components/target/postgres-drizzle) |
+| `contractFactoryStore` | `contractFactorySqliteStore` |
+| `createDevRunner` | [`devRunner`](./guides/basic-development/dev-runner) |
+| `addLog` / `addTransaction` / `addInstruction` / … (query builders) | `addLogRequest` / `addTransactionRequest` / `addInstructionRequest` / … |
+| `createMockPortal` / `createFinalizedMockPortal` / `createTestLogger` / `createMockMetricServer` / `evmPortalMockStream` | `mockPortal` / `finalizedMockPortal` / `testLogger` / `mockMetricsServer` / `mockEvmPortalStream` — see [Testing pipes](./guides/basic-development/testing) |
+| `PortalSource` / `PortalSourceOptions` | `PortalStream` / `PortalStreamOptions` |
+| `Ctx` / `StartCtx` / `StopCtx` | `HookContext` / `StartContext` / `StopContext` |
+| `BatchStreamContext` | `StreamInfo` |
+| `ForkNoPreviousBlocksError` | `MissingForkAncestorError` (code E1002 unchanged) |
+
+`PortalClientOptions` duration keys gained unit suffixes: `maxIdleTime` → `maxIdleTimeMs`, `maxWaitTime` → `maxWaitTimeMs`, `headPollInterval` → `headPollIntervalMs`.
+
+## 2. Fork handling vocabulary
+
+*Fork* names the chain event, *resolveFork* names handling it, *rollback* names the destructive undo:
+
+- Custom target contract method: `fork(previousBlocks)` → `resolveFork(canonicalBlocks)` — see [createTarget](./reference/basic-components/target/create-target).
+- Transformer hook and `Factory` method: `fork` → `rollback` (they receive an already-resolved cursor).
+- `ProgressEvent.state` fields: `initial`/`last` → `from`/`to`; interval stats moved under `intervalStats`.
+
+## 3. ClickHouse `onRollback`
+
+The discriminator key `type` is now `reason`, with values `'recovery'` (was `'offset_check'`) and `'fork'` (was `'blockchain_fork'`). The context's `cursor` duplicate is removed — use `safeCursor`.
+
+## 4. Removed leftovers
+
+All previously deprecated APIs are gone: the aliases `evmPortalSource` / `solanaPortalSource` / `hyperliquidFillsPortalSource`, `factory`, `factorySqliteDatabase`, `chunk`, and `createClickhouseTarget`; Solana `DecodedInstruction.blockNumber` (use `block.number`); and the Parquet `'TIMESTAMP_MILLIS'` column-type alias (write `'TIMESTAMP'` — identical file format).
+
+## 5. Observability
+
+Prometheus gauges `sqd_current_block` / `sqd_last_block` are now `sqd_processed_block` / `sqd_end_block`; the [metrics server](./reference/utility-components/metrics-server) serves `GET /preview/transformation` (was `/exemplars/transformation`) and its `/profiler` payload key is `profiles` (was `profilers`). Upgrade [Pipes UI](./guides/basic-development/pipes-ui) together with the SDK.
+
+## 6. Pipes CLI projects
+
+The CLI's `--config` schema changed shape: `sink` → `target`, top-level `network` → `defaultNetwork`, and each contract now lists `deployments` (address + range) instead of a single address. Projects now carry their config in `pipes.config.json` — update it and re-run `pipes init --config <project>/pipes.config.json` to regenerate in place (your `.env` is preserved). See the [Quickstart](./quickstart) for the current config format.
+
+<Note>
+Very early alphas predate some 0.x-era changes too. If a name from the beta tab's tables still appears in your code, apply that row as well.
+</Note>
+
+</Tab>
+</Tabs>

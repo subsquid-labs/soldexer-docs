@@ -16,7 +16,7 @@ drizzleTarget<T>({
   db: NodePgDatabase,
   tables: Table[] | Record<string, Table>,
   onStart?: (ctx: { db: NodePgDatabase }) => Promise<unknown>,
-  onData: (ctx: { tx: Transaction; data: T; ctx: Ctx }) => Promise<unknown>,
+  onData: (ctx: { tx: Transaction; data: T; ctx: HookContext }) => Promise<unknown>,
   onBeforeRollback?: (ctx: { tx: Transaction; cursor: BlockCursor }) => Promise<unknown> | unknown,
   onAfterRollback?: (ctx: { tx: Transaction; cursor: BlockCursor }) => Promise<unknown> | unknown,
   settings?: {
@@ -45,19 +45,17 @@ drizzleTarget<T>({
 |-------|---------|-------------|
 | `schema` | `'public'` | PostgreSQL schema for the state table. |
 | `table` | `'sync'` | Name of the state table. |
-| `id` | `'stream'` | Stream identifier within the state table. |
+| `id` | Pipe's source `id` | Stream identifier within the state table. An explicit value always wins; otherwise the pipe's source `id` is used. Cursors stored under the legacy `'stream'` key by older SDK versions are migrated automatically on first resume. |
 | `unfinalizedBlocksRetention` | `1000` | Number of unfinalized blocks retained in state for rollback purposes. |
 
-## `batchForInsert`
+## `chunkForInsert`
 
 ```ts
-import { batchForInsert } from '@subsquid/pipes/targets/drizzle/node-postgres'
+import { chunkForInsert } from '@subsquid/pipes/targets/drizzle/node-postgres'
 ```
 
 ```ts
-function batchForInsert<T>(data: readonly T[], size?: number): Generator<T[]>
+function chunkForInsert<T>(data: readonly T[], size?: number): Generator<T[]>
 ```
 
 Splits an array into chunks that fit within PostgreSQL's 32,767-parameter limit. Chunk size is `Math.floor(32767 / columnsPerRecord)` by default. Pass `size` to set a smaller cap; values exceeding the computed maximum are silently clamped.
-
-`chunk` is a deprecated alias for `batchForInsert`.

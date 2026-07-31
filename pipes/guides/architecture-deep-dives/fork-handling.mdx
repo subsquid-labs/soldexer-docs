@@ -12,13 +12,13 @@ Fork handling is only needed for real-time streams (`range.from: 'latest'`). His
 The SDK provides two patterns for consuming a stream. Both use the same state-tracking logic; they differ in how the fork signal is delivered.
 
 <Note>
-If your pipeline includes a [stateful transformer](../advanced-topics/stateful-transforms#fork-callbacks-and-crash-recovery), it must also implement a `fork` callback to roll back its own state in lockstep with the target.
+If your pipeline includes a [stateful transformer](../advanced-topics/stateful-transforms#rollback-callbacks-and-crash-recovery), it must also implement a `rollback` callback to roll back its own state in lockstep with the target.
 </Note>
 
 <Tabs>
 <Tab title="Via pipeTo / targets">
 
-The `pipeTo(createTarget({write, fork}))` pattern keeps fork handling completely separate from batch processing. The SDK catches the 409 internally and calls `fork()` with the portal's consensus slot sample; `write()` never sees the interruption and continues iterating batches without restarting.
+The `pipeTo(createTarget({write, resolveFork}))` pattern keeps fork handling completely separate from batch processing. The SDK catches the 409 internally and calls `resolveFork()` with the portal's consensus slot sample; `write()` never sees the interruption and continues iterating batches without restarting.
 
 <Steps>
 <Step title="Declare state">
@@ -30,7 +30,7 @@ let recentUnfinalizedBlocks: BlockCursor[] = []
 let finalizedHighWatermark: BlockCursor | undefined
 ```
 
-`recentUnfinalizedBlocks` is the local history of unfinalized slots used to find the common ancestor during a fork. `finalizedHighWatermark` tracks the highest finalized slot ever seen — stored as a full `BlockCursor` (number **and** hash) so it can double as a rollback cursor when needed. Both must be declared outside `pipeTo` so `fork()` can access them.
+`recentUnfinalizedBlocks` is the local history of unfinalized slots used to find the common ancestor during a fork. `finalizedHighWatermark` tracks the highest finalized slot ever seen — stored as a full `BlockCursor` (number **and** hash) so it can double as a rollback cursor when needed. Both must be declared outside `pipeTo` so `resolveFork()` can access them.
 
 </Step>
 <Step title="Collect rollback history">
@@ -63,12 +63,12 @@ recentUnfinalizedBlocks = recentUnfinalizedBlocks.slice(recentUnfinalizedBlocks.
 Portal instances behind a load balancer can report different finalized heads. Using the **maximum** seen so far (the high-water mark) prevents the pruning threshold from moving backwards when the stream reconnects to a lagging instance. See [consideration 6](#6-load-balanced-portals-and-a-non-monotonic-finalized-head) for details.
 
 </Step>
-<Step title="Implement fork()">
+<Step title="Implement resolveFork()">
 
-`fork()` receives `previousBlocks` — the portal's current-chain sample — and must return the last good slot cursor, or `null` if recovery is impossible:
+`resolveFork()` receives `canonicalBlocks` — the portal's view of the canonical chain (named `previousBlocks` in the raw 409 payload) — and must return the last good slot cursor, or `null` if recovery is impossible:
 
 ```typescript
-fork: async (newConsensusBlocks) => {
+resolveFork: async (newConsensusBlocks) => {
   const rollbackIndex = findRollbackIndex(recentUnfinalizedBlocks, newConsensusBlocks)
   if (rollbackIndex >= 0) {
     recentUnfinalizedBlocks.length = rollbackIndex + 1
@@ -83,7 +83,7 @@ fork: async (newConsensusBlocks) => {
 }
 ```
 
-Three cases: (1) a common ancestor is found in local history — truncate and return it; (2) all `previousBlocks` fall below the finalized high-water mark, meaning the portal's sample doesn't reach local history — return the high-water mark cursor; (3) no recovery possible — return `null`, which surfaces a `ForkCursorMissingError`.
+Three cases: (1) a common ancestor is found in local history — truncate and return it; (2) all `canonicalBlocks` fall below the finalized high-water mark, meaning the portal's sample doesn't reach local history — return the high-water mark cursor; (3) no recovery possible — return `null`, which surfaces a `ForkCursorMissingError`.
 
 </Step>
 </Steps>
@@ -124,7 +124,7 @@ async function main() {
           recentUnfinalizedSlots = recentUnfinalizedSlots.slice(recentUnfinalizedSlots.length - 1000)
         }
       },
-      fork: async (newConsensusSlots) => {
+      resolveFork: async (newConsensusSlots) => {
         const rollbackIndex = findRollbackIndex(recentUnfinalizedSlots, newConsensusSlots)
         if (rollbackIndex >= 0) {
           recentUnfinalizedSlots.length = rollbackIndex + 1
@@ -161,9 +161,9 @@ function findRollbackIndex(chainA: BlockCursor[], chainB: BlockCursor[]): number
 </Tab>
 <Tab title="Via async iteration (workaround)">
 
-The native `[Symbol.asyncIterator]()` on a `PortalSource` cannot handle forks that require multiple 409 rounds. After a fork, the only option with native iteration is to re-create the stream — but the re-created stream's first request carries no `parentBlockHash`, so the portal cannot detect whether the client is still on the wrong chain and will not send the second 409.
+The native `[Symbol.asyncIterator]()` on a `PortalStream` cannot handle forks that require multiple 409 rounds. After a fork, the only option with native iteration is to re-create the stream — but the re-created stream's first request carries no `parentBlockHash`, so the portal cannot detect whether the client is still on the wrong chain and will not send the second 409.
 
-The root cause: `pipeTo`'s internal `read()` generator maintains a `cursor` variable across fork rounds. After `target.fork()` returns a rollback cursor it sets `cursor = forkedCursor` before re-entering `self.read(cursor)`, keeping `parentBlockHash` populated on every subsequent request. The native async iterator calls `this.read()` with no cursor and has no equivalent mechanism.
+The root cause: `pipeTo`'s internal `read()` generator maintains a `cursor` variable across fork rounds. After `target.resolveFork()` returns a rollback cursor it sets `cursor = forkedCursor` before re-entering `self.read(cursor)`, keeping `parentBlockHash` populated on every subsequent request. The native async iterator calls `this.read()` with no cursor and has no equivalent mechanism.
 
 **Workaround:** wrap `pipeTo` in a helper called `pipeToIterator` that bridges its push-based `write()` into a pull-based iterator via a single-item queue with producer acknowledgement. This preserves the `for await...of` interface while using `pipeTo`'s cursor-tracking machinery internally.
 
@@ -180,7 +180,7 @@ let finalizedHighWatermark: BlockCursor | undefined
 </Step>
 <Step title="Write the fork callback">
 
-The fork callback passed to `pipeToIterator` is identical to `fork()` in the `pipeTo` example — the same three-case logic, the same state mutations:
+The fork callback passed to `pipeToIterator` is identical to `resolveFork()` in the `pipeTo` example — the same three-case logic, the same state mutations:
 
 ```typescript
 async (newConsensusBlocks) => {
@@ -203,7 +203,7 @@ The SDK awaits this callback before resuming the stream, so `recentUnfinalizedBl
 </Step>
 <Step title="Wrap the source and iterate">
 
-Pass the source, the initial cursor, and the fork callback to `pipeToIterator`, then iterate normally:
+Pass the stream, the initial cursor, and the fork callback to `pipeToIterator`, then iterate normally:
 
 ```typescript
 const stream = pipeToIterator(source, recentUnfinalizedBlocks.at(-1), onFork)
@@ -223,7 +223,7 @@ for await (const {data, ctx} of stream) {
 function pipeToIterator<T>(
   source: { pipeTo(t: ReturnType<typeof createTarget<T>>): Promise<void> },
   initialCursor: BlockCursor | undefined,
-  onFork: (previousBlocks: BlockCursor[]) => Promise<BlockCursor | null>
+  onFork: (canonicalBlocks: BlockCursor[]) => Promise<BlockCursor | null>
 ): AsyncIterableIterator<{ data: T; ctx: any }> {
 
   type Slot =
@@ -246,7 +246,7 @@ function pipeToIterator<T>(
       queue.push({ k: 'end' })
       wake()
     },
-    fork: onFork,
+    resolveFork: onFork,
   })).catch((err: unknown) => { queue.push({ k: 'error', err }); wake() })
 
   return {
@@ -366,7 +366,7 @@ The scan advances the pointer for the lower-numbered entry until both point to t
 <AccordionGroup>
 <Accordion title="1. Rollback history bootstrap">
 
-**Empty history at stream start.** The rollback chain is built batch-by-batch from `ctx.stream.state.rollbackChain`. Until the first batch arrives the history is empty. A fork arriving before any batch has been processed means `fork()` will find no common ancestor and must return `null`, which the SDK turns into a fatal error. For a long-running process this window is typically acceptable, but it matters for freshly started consumers.
+**Empty history at stream start.** The rollback chain is built batch-by-batch from `ctx.stream.state.rollbackChain`. Until the first batch arrives the history is empty. A fork arriving before any batch has been processed means `resolveFork()` will find no common ancestor and must return `null`, which the SDK turns into a fatal error. For a long-running process this window is typically acceptable, but it matters for freshly started consumers.
 
 **History gaps from fast-moving finalization.** `rollbackChain` in each batch contains only the slots from *that batch* that are strictly above the current finalized head. A slot that was already at or below the finalized head when its batch was fetched will never appear in any rollback chain and will therefore be absent from history. This can leave gaps in the number sequence. Algorithms that assume a contiguous history will fail; always match by both number *and* hash.
 
@@ -379,23 +379,23 @@ The scan advances the pointer for the lower-numbered entry until both point to t
 
 **`previousBlocks` may have no overlap with local history.** The portal sends a bounded sample. If `findRollbackIndex` finds no agreement point at all (returns -1) and no HWM fallback applies, fork recovery is impossible — return `null`. The SDK will surface a `ForkCursorMissingError`. Do not silently roll back to slot 0 or crash.
 
-**Multiple consecutive 409s converge to the common ancestor.** These two cases are distinct from each other: when `findRollbackIndex` *does* find an overlap point, the stream rolls back there and resumes. If the true common ancestor is deeper still — because the `previousBlocks` sample only reached partway — the portal detects another mismatch and sends a fresh 409 with an older window, this time closer to the true ancestor. The stream converges over several rounds. `fork()` must be idempotent across these calls; truncating the history array in place handles this correctly, since each call receives a shorter local history. Database-backed approaches must also handle re-entrant rollback calls.
+**Multiple consecutive 409s converge to the common ancestor.** These two cases are distinct from each other: when `findRollbackIndex` *does* find an overlap point, the stream rolls back there and resumes. If the true common ancestor is deeper still — because the `previousBlocks` sample only reached partway — the portal detects another mismatch and sends a fresh 409 with an older window, this time closer to the true ancestor. The stream converges over several rounds. `resolveFork()` must be idempotent across these calls; truncating the history array in place handles this correctly, since each call receives a shorter local history. Database-backed approaches must also handle re-entrant rollback calls.
 
 </Accordion>
 <Accordion title="3. Rollback depth and history limits">
 
 **Fork deeper than your history.** If you cap rollback history (e.g. to 1000 slots), a reorg deeper than the cap is unrecoverable. Choose the cap based on the worst-case reorg depth for your target network. Ethereum mainnet finalizes within ~64 slots (~2 epochs), but PoW or pre-finality networks can reorg much deeper. Fail loudly rather than silently replaying from slot 0.
 
-**The finalized slot as the last-resort anchor.** Keep the current finalized slot *in* your rollback history even though it is technically not unfinalized. It is the guaranteed safe floor: the portal will never ask you to roll back past it. Having it available means `fork()` can always return a valid cursor for the deepest possible reorg. Pruning with `number > finalized` instead of `number >= finalized` removes this anchor and makes very deep reorgs unrecoverable.
+**The finalized slot as the last-resort anchor.** Keep the current finalized slot *in* your rollback history even though it is technically not unfinalized. It is the guaranteed safe floor: the portal will never ask you to roll back past it. Having it available means `resolveFork()` can always return a valid cursor for the deepest possible reorg. Pruning with `number > finalized` instead of `number >= finalized` removes this anchor and makes very deep reorgs unrecoverable.
 
 **History that never gets pruned.** If the portal never sends a finalized head, rollback history will grow without bound. Apply a slot-count cap as a secondary safeguard.
 
 </Accordion>
 <Accordion title="4. State rollback atomicity">
 
-**Business state and rollback-chain history must be rolled back atomically.** For databases with transactions (Postgres), both must be updated in the same transaction — a crash between the two leaves `fork()` computing the wrong rollback point.
+**Business state and rollback-chain history must be rolled back atomically.** For databases with transactions (Postgres), both must be updated in the same transaction — a crash between the two leaves `resolveFork()` computing the wrong rollback point.
 
-**For non-transactional databases (ClickHouse), atomicity is not achievable; use a crash-recovery callback instead.** Write application data first, write the rollback-chain checkpoint second. A crash after data but before the checkpoint save leaves the checkpoint pointing to the previous batch. On every restart, before the stream resumes, the checkpoint cursor should be read and used to purge any rows written after it — this closes the gap. This is how the Pipes SDK ClickHouse target works: `onRollback` is invoked with `type: 'offset_check'` on every startup so user code can delete the partial batch. Because ClickHouse `DELETE`s are asynchronous and unsafe under concurrent writes, the SDK inserts tombstone rows (`sign = -1`) via `CollapsingMergeTree` instead of issuing true deletes; queries that need to see only live rows must use the `FINAL` modifier.
+**For non-transactional databases (ClickHouse), atomicity is not achievable; use a crash-recovery callback instead.** Write application data first, write the rollback-chain checkpoint second. A crash after data but before the checkpoint save leaves the checkpoint pointing to the previous batch. On every restart, before the stream resumes, the checkpoint cursor should be read and used to purge any rows written after it — this closes the gap. This is how the Pipes SDK ClickHouse target works: `onRollback` is invoked with `reason: 'recovery'` on every startup so user code can delete the partial batch. Because ClickHouse `DELETE`s are asynchronous and unsafe under concurrent writes, the SDK removes rows on `CollapsingMergeTree`-family tables by inserting tombstone rows (`sign = -1`) rather than issuing true deletes; queries that need to see only live rows must net them out (e.g. with the `FINAL` modifier or a `sum(sign)` aggregation). On non-collapsing engines it falls back to a lightweight `DELETE`.
 
 **Rolling back spans multiple batches.** A single reorg can invalidate data written across many batches. Your rollback mechanism must undo *all* rows/documents written after the rollback point, not just the last batch.
 
@@ -406,7 +406,7 @@ The scan advances the pointer for the lower-numbered entry until both point to t
 </Accordion>
 <Accordion title="5. Cursor semantics">
 
-**The cursor returned from `fork()` is inclusive.** Return the last slot you consider good; the SDK resumes from `cursor.number + 1`. Off-by-one errors cause either duplicate re-processing or skipped slots.
+**The cursor returned from `resolveFork()` is inclusive.** Return the last slot you consider good; the SDK resumes from `cursor.number + 1`. Off-by-one errors cause either duplicate re-processing or skipped slots.
 
 **The cursor hash must be set.** The SDK sends `parentBlockHash = cursor.hash` in the next request so the portal can detect the next fork. A cursor with a missing hash silently disables fork detection for that request.
 
@@ -457,9 +457,9 @@ The scan advances the pointer for the lower-numbered entry until both point to t
 </Accordion>
 <Accordion title="10. Concurrency and ordering invariants">
 
-**`fork()` is called synchronously relative to the batch stream.** The SDK awaits `fork()` before resuming the stream. No new batches arrive while `fork()` is running. It is safe to mutate shared state inside `fork()` without additional locking.
+**`resolveFork()` is called synchronously relative to the batch stream.** The SDK awaits `resolveFork()` before resuming the stream. No new batches arrive while `resolveFork()` is running. It is safe to mutate shared state inside `resolveFork()` without additional locking.
 
-**`write()` and `fork()` share mutable state without synchronization.** This is safe only because the SDK never calls them concurrently. If you introduce background workers or async tasks that also read or write rollback state, you must add explicit synchronization.
+**`write()` and `resolveFork()` share mutable state without synchronization.** This is safe only because the SDK never calls them concurrently. If you introduce background workers or async tasks that also read or write rollback state, you must add explicit synchronization.
 
 **The order in which you update rollback history and application state matters.** If you update application state first and crash before updating rollback history, the next restart will not know how far to roll back. Prefer database transactions that update both atomically, or update rollback history first so a crash leaves you conservative — you can always re-process a slot you have already seen.
 

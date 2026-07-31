@@ -14,9 +14,9 @@ createTransformer<I, O>(config: TransformerOptions<I, O>): Transformer<I, O>
 **Config fields:**
 
 - `transform`: (required) `(data: I, ctx: BatchContext) => O | Promise<O>`. Called once per batch.
-- `start`: (optional) `(ctx: StartCtx) => void | Promise<void>`. Called once when the pipe starts. Use this to load state, warm up caches, or query the portal for historical data before the main stream begins.
-- `stop`: (optional) `(ctx: StopCtx) => void | Promise<void>`. Called once when the pipe stops.
-- `fork`: (optional) `(cursor: BlockCursor, ctx: Ctx) => void | Promise<void>`. Called before the next batch whenever the source detects a chain reorg. `cursor` identifies the last safe slot. See [Fork handling](../../guides/architecture-deep-dives/fork-handling).
+- `start`: (optional) `(ctx: StartContext) => void | Promise<void>`. Called once when the pipe starts. Use this to load state, warm up caches, or query the portal for historical data before the main stream begins.
+- `stop`: (optional) `(ctx: StopContext) => void | Promise<void>`. Called once when the pipe stops.
+- `rollback`: (optional) `(cursor: BlockCursor, ctx: HookContext) => void | Promise<void>`. Called after the source detects a chain reorg and resolves the safe cursor. `cursor` identifies the last safe slot; undo any internal state above it. See [Fork handling](../../guides/architecture-deep-dives/fork-handling).
 - `profiler`: (optional) `{ name: string; hidden?: boolean }`. Overrides the transformer's node name in the [profiler](../../guides/advanced-topics/profiling) tree.
 
 **Example:**
@@ -45,10 +45,10 @@ Each callback receives a context object. The fields differ by callback.
 | `logger` | `Logger` | Pino-compatible logger scoped to this batch. Defaults to the source-level logger. |
 | `metrics` | `Metrics` | Prometheus metrics registry. Use `ctx.metrics.counter()`, `.gauge()`, `.histogram()`, `.summary()` to register and update custom metrics. See [Metrics](../../guides/advanced-topics/metrics). |
 | `profiler` | `Profiler` | Open a span with `ctx.profiler.start('label')`. See [Profiling](../../guides/advanced-topics/profiling). |
-| `stream` | `BatchStreamContext` | Per-stream state (see below). |
+| `stream` | `StreamInfo` | Per-stream state (see below). |
 | `batch` | `BatchMetadata` | Per-batch volume info (see below). |
 
-#### `ctx.stream: BatchStreamContext`
+#### `ctx.stream: StreamInfo`
 
 | Field | Type | Description |
 |---|---|---|
@@ -71,7 +71,7 @@ Each callback receives a context object. The fields differ by callback.
 | `requests` | `Record<number, number>` | Map of HTTP status code → number of responses that produced this batch. |
 | `lastBlockReceivedAt` | `Date` | Wall-clock time the last block was received. |
 
-### `start(ctx: StartCtx)`
+### `start(ctx: StartContext)`
 
 Fired once, before any batch. Use to warm up caches or run one-off queries.
 
@@ -84,19 +84,45 @@ Fired once, before any batch. Use to warm up caches or run one-off queries.
 | `state.initial` | `number` | First slot the stream was configured to read. |
 | `state.current` | `BlockCursor \| undefined` | Cursor persisted by the previous run, if any. `undefined` on a fresh start. |
 
-### `fork(cursor, ctx: Ctx)`
+### `rollback(cursor, ctx: HookContext)`
 
-Fired before the next batch whenever a reorg is detected. `cursor` is the last slot to keep; drop state produced for anything after it.
+Fired before the next batch whenever a reorg is detected, after the safe cursor has been resolved. `cursor` is the last slot to keep; drop state produced for anything after it.
 
 | Field | Type | Description |
 |---|---|---|
 | `logger` | `Logger` | Same as in `BatchContext`. |
 | `profiler` | `Profiler` | Same as in `BatchContext`. |
 
-### `stop(ctx: StopCtx)`
+### `stop(ctx: StopContext)`
 
 Fired once when the pipe stops.
 
 | Field | Type | Description |
 |---|---|---|
 | `logger` | `Logger` | Same as in `BatchContext`. |
+
+## The `OutputOf` type helper
+
+`OutputOf<T>` infers the output type of a query-transform combo, a transformer, a transform function, or a record of named outputs. Use it to type downstream transform functions without spelling out intermediate types:
+
+```ts
+import { OutputOf } from '@subsquid/pipes'
+import { solanaQuery } from '@subsquid/pipes/solana'
+
+function myDecoder() {
+  return solanaQuery()
+    .addFields({ block: { number: true, timestamp: true } })
+    .includeAllBlocks()
+    .build()
+    .pipe((blocks) => blocks.map((b) => ({ slot: b.header.number })))
+}
+
+type MyDecoderOut = OutputOf<typeof myDecoder> // { slot: number }[]
+
+function myTransformation(): (data: MyDecoderOut) => { s: number }[] {
+  return (data) => data.map((i) => ({ s: i.slot }))
+}
+```
+
+
+It also works on a whole `outputs` record: `OutputOf<typeof outputs>` yields `{ name1: ..., name2: ... }`.

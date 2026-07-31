@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="800" height="648" viewBox="0 0 800 648" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 Z" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrow-sm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 Z" fill="#cbd5e1"/>
+    </marker>
+  </defs>
+
+  <!-- canvas -->
+  <rect x="0" y="0" width="800" height="648" rx="12" fill="#ffffff"/>
+
+  <!-- ═══ portal origin ═══ -->
+  <rect x="325" y="20" width="150" height="34" rx="17" fill="#2563eb"/>
+  <text x="400" y="41" text-anchor="middle" font-size="12.5" font-weight="600" fill="#ffffff">SQD Portal</text>
+  <line x1="400" y1="58" x2="400" y2="74" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="412" y="70" font-size="11.5" fill="#94a3b8">server-filtered blocks</text>
+
+  <!-- ═══ source container ═══ -->
+  <rect x="28" y="78" width="744" height="300" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="48" y="110" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14" font-weight="600" fill="#1e40af">solanaPortalStream()</text>
+  <text x="752" y="110" text-anchor="end" font-size="12" fill="#94a3b8">source</text>
+  <line x1="28" y1="126" x2="772" y2="126" stroke="#e2e8f0" stroke-width="1"/>
+
+  <!-- column headers (named outputs) -->
+  <text x="160" y="156" text-anchor="middle" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#2563eb">someOutput</text>
+  <text x="400" y="156" text-anchor="middle" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#2563eb">instructionsOutput</text>
+  <text x="640" y="156" text-anchor="middle" font-size="12.5" font-style="italic" fill="#94a3b8">…more outputs</text>
+
+  <!-- column 1: plain query + transforms -->
+  <rect x="48" y="166" width="224" height="180" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="64" y="192" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#0f172a">solanaQuery()</text>
+  <text x="64" y="210" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#64748b">&#160;&#160;.addFields(…)</text>
+  <text x="64" y="228" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#64748b">&#160;&#160;.addInstructionRequest(…)</text>
+  <text x="64" y="246" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#0f172a">&#160;&#160;.build()</text>
+  <line x1="160" y1="256" x2="160" y2="270" stroke="#cbd5e1" stroke-width="1.5" marker-end="url(#arrow-sm)"/>
+  <text x="160" y="288" text-anchor="middle" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#64748b">.pipe(transform0)</text>
+  <text x="160" y="306" text-anchor="middle" font-size="13" fill="#cbd5e1">⋯</text>
+  <text x="160" y="324" text-anchor="middle" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#64748b">.pipe(transformN)</text>
+
+  <!-- column 2: solanaInstructionDecoder combo (query + decode) -->
+  <rect x="288" y="166" width="224" height="142" rx="8" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1.5"/>
+  <text x="400" y="188" text-anchor="middle" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" font-weight="600" fill="#1d4ed8">solanaInstructionDecoder()</text>
+  <rect x="300" y="198" width="208" height="64" rx="6" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="312" y="216" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#0f172a">solanaQuery()</text>
+  <text x="306" y="232" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#64748b">&#160;&#160;.addInstructionRequest(…)</text>
+  <text x="312" y="248" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#0f172a">&#160;&#160;.build()</text>
+  <line x1="400" y1="268" x2="400" y2="280" stroke="#cbd5e1" stroke-width="1.5" marker-end="url(#arrow-sm)"/>
+  <text x="400" y="298" text-anchor="middle" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#64748b">.pipe(decode)</text>
+
+  <!-- trailing per-query transforms: chained after solanaInstructionDecoder(), outside the combo -->
+  <text x="400" y="324" text-anchor="middle" font-size="13" fill="#cbd5e1">⋯</text>
+  <text x="400" y="342" text-anchor="middle" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#64748b">.pipe(transformN)</text>
+
+  <!-- column 3: more outputs -->
+  <rect x="528" y="166" width="224" height="180" rx="8" fill="none" stroke="#e2e8f0" stroke-width="1.5" stroke-dasharray="5 5"/>
+  <text x="640" y="264" text-anchor="middle" font-size="24" fill="#cbd5e1">⋯</text>
+
+  <!-- ═══ batch ═══ -->
+  <line x1="400" y1="378" x2="400" y2="402" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="204" y="406" width="392" height="44" rx="10" fill="#0f172a"/>
+  <text x="400" y="433" text-anchor="middle" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="13" fill="#e2e8f0">data: { someOutput, instructionsOutput, … }</text>
+  <text x="188" y="433" text-anchor="end" font-size="11.5" fill="#94a3b8">per batch</text>
+
+  <!-- ═══ whole-pipe transformer ═══ -->
+  <line x1="400" y1="450" x2="400" y2="474" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="250" y="478" width="300" height="36" rx="18" fill="#f5f3ff" stroke="#ddd6fe" stroke-width="1.5"/>
+  <text x="400" y="501" text-anchor="middle" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#6d28d9">.pipe(createTransformer())</text>
+  <text x="566" y="501" font-size="11.5" fill="#94a3b8">optional</text>
+
+  <!-- ═══ termination ═══ -->
+  <line x1="400" y1="514" x2="400" y2="538" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="68" y="542" width="264" height="72" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="200" y="568" text-anchor="middle" font-size="12" fill="#334155">Async iterator</text>
+  <text x="200" y="590" text-anchor="middle" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="11" fill="#64748b">for await (const { data } of pipe)</text>
+  <text x="348" y="582" text-anchor="middle" font-size="12" fill="#94a3b8">or</text>
+  <rect x="364" y="542" width="368" height="72" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="548" y="566" text-anchor="middle" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" fill="#334155">.pipeTo(target)</text>
+  <g font-size="11" fill="#475569">
+    <rect x="378" y="578" width="62" height="20" rx="10" fill="#f1f5f9" stroke="#e2e8f0"/>
+    <text x="409" y="592" text-anchor="middle">Postgres</text>
+    <rect x="448" y="578" width="74" height="20" rx="10" fill="#f1f5f9" stroke="#e2e8f0"/>
+    <text x="485" y="592" text-anchor="middle">ClickHouse</text>
+    <rect x="530" y="578" width="62" height="20" rx="10" fill="#f1f5f9" stroke="#e2e8f0"/>
+    <text x="561" y="592" text-anchor="middle">BigQuery</text>
+    <rect x="600" y="578" width="58" height="20" rx="10" fill="#f1f5f9" stroke="#e2e8f0"/>
+    <text x="629" y="592" text-anchor="middle">Parquet</text>
+    <rect x="666" y="578" width="54" height="20" rx="10" fill="#f1f5f9" stroke="#e2e8f0"/>
+    <text x="693" y="592" text-anchor="middle">custom</text>
+  </g>
+</svg>

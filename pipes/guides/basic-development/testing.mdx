@@ -1,0 +1,87 @@
+---
+title: "Testing pipes"
+description: "Test pipe logic against a mock portal, without network access"
+---
+
+`@subsquid/pipes/testing` provides utilities for testing pipes end-to-end without hitting a real portal:
+
+- `mockPortal(responses)` / `finalizedMockPortal(responses)`: spin up a local HTTP server that plays back scripted portal responses. Both resolve to `{ url, close() }`; pass `url` as the stream's `portal`.
+- `readAll(stream)`: drain a stream into a flat array of data items.
+
+
+For Solana there are no typed block builders yet; construct portal responses as raw block objects. Each response entry mirrors the portal wire format: a `header` plus the requested data items (`instructions`, `transactions`, etc.).
+
+## Example (Vitest)
+
+```ts expandable
+import { solanaInstructionDecoder, solanaPortalStream } from '@subsquid/pipes/solana'
+import { MockPortal, MockResponse, mockPortal, readAll } from '@subsquid/pipes/testing'
+import { beforeEach, describe, expect, it } from 'vitest'
+
+import * as tokenProgram from './abi/tokenProgram/index.js'
+
+const PORTAL_MOCK_RESPONSE: MockResponse[] = [
+  {
+    statusCode: 200,
+    data: [
+      {
+        header: { number: 1, hash: 'ooooooooooooooooooooooooooooooooooooooooooo1', timestamp: 2000 },
+        instructions: [
+          {
+            transactionIndex: 85,
+            instructionAddress: [2, 0, 0],
+            programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+            accounts: [
+              '98vhGWL5CtK61KSKCJjJn2PVfkjzaw9QF6sRLptBWZvZ',
+              '49gyyvxzf61PknHoTg2cFGYQCJRnUrC7Web8h8go7ceM',
+              'EDMGEpKKGKS7nxpu1gjLmuHHWAmvLNy3BZWDxNC3nhAt',
+            ],
+            data: '3DXy58UDhJuu',
+          },
+        ],
+      },
+    ],
+  },
+]
+
+describe('Solana pipe', () => {
+  let portal: MockPortal
+
+  beforeEach(async () => {
+    await portal?.close()
+    portal = await mockPortal(PORTAL_MOCK_RESPONSE)
+  })
+
+  it('decodes instructions from mock blocks', async () => {
+    const stream = solanaPortalStream({
+      id: 'test',
+      portal: portal.url,
+      logger: false,
+      outputs: solanaInstructionDecoder({
+        range: { from: 0, to: 1 },
+        programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+        instructions: { transfers: tokenProgram.instructions.transfer },
+      }).pipe((e) => e.transfers),
+    })
+
+    const res = await readAll(stream)
+
+    expect(res).toHaveLength(1)
+  })
+})
+```
+
+
+## Mock response types
+
+`mockPortal` accepts an array of scripted responses, played back in order:
+
+```ts
+type MockResponse =
+  | { statusCode: 204 }                                                  // empty response
+  | { statusCode: 200, data: [...], head?: { finalized?, latest? } }     // data blocks
+  | { statusCode: 409, data: { previousBlocks: [...] } }                 // fork signal
+  | { statusCode: 500 | 503 }                                            // server error
+```
+
+The 409 variant lets you test [fork handling](../architecture-deep-dives/fork-handling) deterministically, and 500/503 let you exercise retry behavior.

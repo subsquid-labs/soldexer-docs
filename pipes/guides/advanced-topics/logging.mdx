@@ -3,15 +3,15 @@ title: "Logging"
 description: "Configure Pino-compatible logging for a Solana Pipes SDK pipeline."
 ---
 
-[solanaPortalSource()](../../reference/basic-components/source) accepts a Pino-compatible `logger`, allowing you to integrate custom log transports and send logs to external services like GCP Cloud Logging, Sentry, or any other Pino-compatible destination.
+[solanaPortalStream()](../../reference/basic-components/source) accepts a Pino-compatible `logger`, so you can route pipeline logs to any Pino transport — GCP Cloud Logging, Sentry, or a local pretty-printer. Configure it once on the source; every transformer and target then receives the same instance as `ctx.logger`.
 
 ## Basic custom logger
 
-Pass a custom logger to the source to configure logging for your entire pipeline.
+Build a Pino transport, pass `pino(transport)` as the source's `logger`, and the whole pipeline logs through it:
 
-```ts
+```ts expandable
 import { createTarget } from "@subsquid/pipes";
-import { solanaPortalSource } from "@subsquid/pipes/solana";
+import { solanaPortalStream, solanaQuery } from "@subsquid/pipes/solana";
 import pino from "pino";
 
 async function main() {
@@ -23,165 +23,79 @@ async function main() {
     },
   });
 
-  const source = solanaPortalSource({
+  const source = solanaPortalStream({
+    id: "custom-logging",
     portal: "https://portal.sqd.dev/datasets/solana-mainnet",
+    outputs: solanaQuery()
+      .addFields({ block: { number: true, timestamp: true } })
+      .includeAllBlocks()
+      .build(),
     logger: pino(transport),
   });
 
-  const target = createTarget({
-    write: async ({ logger, read }) => {
-      for await (const { data } of read()) {
-        logger.info({ count: data.length }, "Processed batch");
-      }
-    },
-  });
-
-  await source.pipeTo(target);
+  await source.pipeTo(
+    createTarget({
+      write: async ({ logger, read }) => {
+        for await (const { data } of read()) {
+          logger.info({ count: data.length }, "Processed batch");
+        }
+      },
+    }),
+  );
 }
 
 void main()
 ```
 
-## Integration with cloud services
+## Cloud transports
 
-You can use any Pino transport to send logs to cloud services. Pass the configured logger to the source.
+Only the `transport` changes per destination — the rest of the pipe above stays the same. Build the transport, then pass `pino(transport)` as the source `logger`.
 
 <Tabs>
 <Tab title="GCP Cloud Logging">
 
 ```ts
-import { createTarget } from "@subsquid/pipes";
-import { solanaPortalSource } from "@subsquid/pipes/solana";
-import pino from "pino";
-
-async function main() {
-  const transport = pino.transport({
-    target: "@google-cloud/logging-pino",
-    options: {
-      projectId: "your-project-id",
-      logName: "pipes-indexer",
-    },
-  });
-
-  const source = solanaPortalSource({
-    portal: "https://portal.sqd.dev/datasets/solana-mainnet",
-    logger: pino(transport),
-  });
-
-  const target = createTarget({
-    write: async ({ logger, read }) => {
-      for await (const { data } of read()) {
-        logger.info(
-          {
-            blocksProcessed: data.blocks?.length,
-            eventsCount: data.transfer?.length,
-          },
-          "Batch processed"
-        );
-      }
-    },
-  });
-
-  await source.pipeTo(target);
-}
-
-void main()
+const transport = pino.transport({
+  target: "@google-cloud/logging-pino",
+  options: {
+    projectId: "your-project-id",
+    logName: "pipes-indexer",
+  },
+});
 ```
 </Tab>
 
 <Tab title="Sentry">
 
+Route only errors to Sentry, and wrap the write loop so failures surface as `logger.error`:
+
 ```ts
-import { createTarget } from "@subsquid/pipes";
-import { solanaPortalSource } from "@subsquid/pipes/solana";
-import pino from "pino";
-
-async function main() {
-  const transport = pino.transport({
-    target: "pino-sentry-transport",
-    options: {
-      sentry: {
-        dsn: process.env.SENTRY_DSN,
-        environment: "production",
-      },
-      level: "error", // Only send errors to Sentry
-    },
-  });
-
-  const source = solanaPortalSource({
-    portal: "https://portal.sqd.dev/datasets/solana-mainnet",
-    logger: pino(transport),
-  });
-
-  const target = createTarget({
-    write: async ({ logger, read }) => {
-      for await (const { data } of read()) {
-        try {
-          await processData(data);
-          logger.info({ count: data.length }, "Batch processed");
-        } catch (error) {
-          logger.error({ error, data }, "Failed to process batch");
-        }
-      }
-    },
-  });
-
-  await source.pipeTo(target);
-}
-
-void main()
+const transport = pino.transport({
+  target: "pino-sentry-transport",
+  options: {
+    sentry: { dsn: process.env.SENTRY_DSN, environment: "production" },
+    level: "error", // only forward errors to Sentry
+  },
+});
 ```
 </Tab>
 
-<Tab title="Multiple Transports">
+<Tab title="Multiple transports">
+
+Fan out to several destinations at once, each with its own level:
 
 ```ts
-import { createTarget } from "@subsquid/pipes";
-import { solanaPortalSource } from "@subsquid/pipes/solana";
-import pino from "pino";
-
-async function main() {
-  const transport = pino.transport({
-    targets: [
-      {
-        target: "pino-pretty",
-        options: { colorize: true },
-        level: "info",
-      },
-      {
-        target: "@google-cloud/logging-pino",
-        options: { projectId: "your-project-id" },
-        level: "info",
-      },
-      {
-        target: "pino-sentry-transport",
-        options: { sentry: { dsn: process.env.SENTRY_DSN } },
-        level: "error",
-      },
-    ],
-  });
-
-  const source = solanaPortalSource({
-    portal: "https://portal.sqd.dev/datasets/solana-mainnet",
-    logger: pino(transport),
-  });
-
-  const target = createTarget({
-    write: async ({ logger, read }) => {
-      for await (const { data } of read()) {
-        logger.info({ count: data.length }, "Processed batch");
-      }
-    },
-  });
-
-  await source.pipeTo(target);
-}
-
-void main()
+const transport = pino.transport({
+  targets: [
+    { target: "pino-pretty", options: { colorize: true }, level: "info" },
+    { target: "@google-cloud/logging-pino", options: { projectId: "your-project-id" }, level: "info" },
+    { target: "pino-sentry-transport", options: { sentry: { dsn: process.env.SENTRY_DSN } }, level: "error" },
+  ],
+});
 ```
 </Tab>
 </Tabs>
 
 <Tip>
-The `ctx.logger` in transformers and targets is the same logger instance passed to the source. Configure logging at the source level, then use `ctx.logger` throughout your pipeline for consistent logging.
+The `ctx.logger` in transformers and targets is the same logger instance passed to the source. Configure logging once at the source, then use `ctx.logger` throughout your pipeline.
 </Tip>

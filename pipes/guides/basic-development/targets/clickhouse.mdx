@@ -15,7 +15,7 @@ At a glance, the pipeline looks like this:
 import { createClient } from '@clickhouse/client'
 import { clickhouseTarget } from '@subsquid/pipes/targets/clickhouse'
 
-await solanaPortalSource({ ... }).pipeTo(
+await solanaPortalStream({ ... }).pipeTo(
   clickhouseTarget({
     client: createClient({ url: 'http://localhost:8123' }),
     onData: async ({ store, data }) => {
@@ -35,12 +35,13 @@ Use `CollapsingMergeTree` with a `sign Int8 DEFAULT 1` column. This engine enabl
 
 ```sql
 CREATE TABLE IF NOT EXISTS swaps (
-  slot              UInt64 CODEC(DoubleDelta, ZSTD),
-  instruction_index UInt32,
-  program_id        String,
-  sign              Int8 DEFAULT 1
+  slot                UInt64 CODEC(DoubleDelta, ZSTD),
+  transaction_index   UInt32,
+  instruction_address String,
+  program_id          String,
+  sign                Int8 DEFAULT 1
 ) ENGINE = CollapsingMergeTree(sign)
-  ORDER BY (slot, instruction_index);
+  ORDER BY (slot, transaction_index, instruction_address);
 ```
 
 
@@ -66,9 +67,10 @@ onData: async ({ store, data }) => {
   store.insert({
     table: 'swaps',
     values: data.swap.map((d) => ({
-      slot:              d.block.slot,
-      instruction_index: d.instruction.instructionIndex,
-      program_id:        d.programId,
+      slot:                d.block.number,
+      transaction_index:   d.rawInstruction.transactionIndex,
+      instruction_address: d.rawInstruction.instructionAddress.join('.'),
+      program_id:          d.programId,
     })),
     format: 'JSONEachRow',
   })
@@ -80,10 +82,10 @@ onData: async ({ store, data }) => {
 
 Implement `onRollback` to handle blockchain forks. It is invoked in two situations:
 
-- `type: 'offset_check'` — on startup, when a saved cursor is found, to discard writes from a previous crashed or partial run
-- `type: 'blockchain_fork'` — when the stream detects a chain reorganisation
+- `reason: 'recovery'` — on every restart with a saved cursor, to discard writes from a previous crashed or partial run
+- `reason: 'fork'` — when the stream detects a chain reorganisation
 
-Use `store.removeAllRows()` to cancel rows past the safe point. For `CollapsingMergeTree` tables this re-inserts matching rows with `sign = -1`:
+Use `store.removeAllRows()` to remove rows past the safe point. On `CollapsingMergeTree`-family tables with a `sign` column this re-inserts matching rows with `sign = -1` (the only removal mechanism that propagates through materialized views); on other engines it falls back to a lightweight `DELETE` with a logged warning (requires ClickHouse ≥ 23.3):
 
 ```ts
 onRollback: async ({ store, safeCursor }) => {
@@ -98,18 +100,20 @@ onRollback: async ({ store, safeCursor }) => {
 ## Complete example
 
 ```ts expandable
-import { solanaInstructionDecoder, solanaPortalSource } from '@subsquid/pipes/solana'
+import { solanaInstructionDecoder, solanaPortalStream } from '@subsquid/pipes/solana'
 import { clickhouseTarget } from '@subsquid/pipes/targets/clickhouse'
 import { createClient } from '@clickhouse/client'
+import * as orcaWhirlpool from './abi/orca_whirlpool/index.js'
 
 const client = createClient({ url: 'http://localhost:8123' })
 
-await solanaPortalSource({
+await solanaPortalStream({
+  id: 'orca-swaps-clickhouse',
   portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
   outputs: solanaInstructionDecoder({
     range: { from: '340000000' },
-    programId: '...',
-    instructions: { swap: swapInstruction },
+    programId: orcaWhirlpool.programId,
+    instructions: { swap: orcaWhirlpool.instructions.swap },
   }),
 }).pipeTo(
   clickhouseTarget({
@@ -118,12 +122,13 @@ await solanaPortalSource({
       await store.command({
         query: `
           CREATE TABLE IF NOT EXISTS swaps (
-            slot              UInt64 CODEC(DoubleDelta, ZSTD),
-            instruction_index UInt32,
-            program_id        String,
-            sign              Int8 DEFAULT 1
+            slot                UInt64 CODEC(DoubleDelta, ZSTD),
+            transaction_index   UInt32,
+            instruction_address String,
+            program_id          String,
+            sign                Int8 DEFAULT 1
           ) ENGINE = CollapsingMergeTree(sign)
-            ORDER BY (slot, instruction_index)
+            ORDER BY (slot, transaction_index, instruction_address)
         `,
       })
     },
@@ -131,9 +136,10 @@ await solanaPortalSource({
       store.insert({
         table: 'swaps',
         values: data.swap.map((d) => ({
-          slot:              d.block.slot,
-          instruction_index: d.instruction.instructionIndex,
-          program_id:        d.programId,
+          slot:                d.block.number,
+          transaction_index:   d.rawInstruction.transactionIndex,
+          instruction_address: d.rawInstruction.instructionAddress.join('.'),
+          program_id:          d.programId,
         })),
         format: 'JSONEachRow',
       })

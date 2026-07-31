@@ -1,0 +1,92 @@
+---
+title: "OpenTelemetry tracing"
+description: "Export pipe profiler spans to Jaeger or any OTLP backend"
+---
+
+The [profiler](./profiling) span tree can be exported as OpenTelemetry traces. Pass `opentelemetryProfiler()` as the source's `profiler` option; every batch then produces a trace with one span per pipeline stage, viewable in Jaeger, Tempo, or any OTLP-compatible backend.
+
+```ts
+import { opentelemetryProfiler } from '@subsquid/pipes/opentelemetry'
+```
+
+`@opentelemetry/api` is an optional peer dependency. The exporter setup below additionally uses the OTEL Node SDK:
+
+```bash
+npm install @opentelemetry/sdk-node @opentelemetry/exporter-trace-otlp-http
+```
+
+## Setup
+
+The pipe change is a single option — swap `profiler: true` for `opentelemetryProfiler()`:
+
+```ts
+const stream = solanaPortalStream({
+  // ...
+  profiler: opentelemetryProfiler(),
+})
+```
+
+The rest is one-time OTEL SDK bootstrap at process startup: wire the OTLP exporter, then flush spans before exit. The complete program:
+
+```ts expandable
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
+import { NodeSDK } from '@opentelemetry/sdk-node'
+import { solanaInstructionDecoder, solanaPortalStream } from '@subsquid/pipes/solana'
+import { opentelemetryProfiler } from '@subsquid/pipes/opentelemetry'
+import * as orcaWhirlpool from './abi/orca_whirlpool/index.js'
+
+const sdk = new NodeSDK({
+  serviceName: 'my-pipe',
+  traceExporter: new OTLPTraceExporter({
+    // Jaeger OTLP HTTP endpoint (default port 4318)
+    url: 'http://localhost:4318/v1/traces',
+  }),
+})
+
+sdk.start()
+
+async function cli() {
+  const stream = solanaPortalStream({
+    id: 'jaeger-tracing',
+    portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+    profiler: opentelemetryProfiler(),
+    outputs: solanaInstructionDecoder({
+      range: { from: 'latest' },
+      programId: orcaWhirlpool.programId,
+      instructions: { swap: orcaWhirlpool.instructions.swap },
+    }),
+  })
+
+  for await (const { data } of stream) {
+    console.log(data.swap.length)
+  }
+
+  // flush remaining spans before the process exits
+  await sdk.shutdown()
+}
+
+void cli()
+```
+
+
+To attach pipe spans to an existing trace (for example, when the pipe runs inside a request handler), pass an OTEL context:
+
+```ts
+profiler: opentelemetryProfiler(requestContext)
+```
+
+## Running Jaeger locally
+
+Jaeger supports OTLP natively since v1.35:
+
+```bash
+docker run --rm --name jaeger \
+  -p 16686:16686 \
+  -p 4317:4317 \
+  -p 4318:4318 \
+  cr.jaegertracing.io/jaegertracing/jaeger:2.15.0
+```
+
+Open `http://localhost:16686` and search for the service name you configured (`my-pipe` above). Each batch appears as a trace; the span hierarchy matches the [profiler tree](./profiling): data fetch, transformers (including named decoder spans), and target stages.
+
+Full runnable example: [`13.jaeger-tracing.example.ts`](https://github.com/subsquid-labs/pipes-sdk/blob/main/docs/examples/evm/13.jaeger-tracing.example.ts).

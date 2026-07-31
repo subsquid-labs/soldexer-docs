@@ -19,16 +19,19 @@ solanaPortalStream({
 **Parameters:**
 
 - `port`: HTTP port for the server (default: `9090`).
+- `enabled`: Set to `false` to disable the server without removing it from the config (optional).
+- `logger`: A pino-compatible `Logger` instance for the server's own log output (optional).
 
 ## Endpoints
 
-`metricsServer()` serves four HTTP endpoints on the configured port. They are all also useful for ad-hoc inspection with `curl`.
+`metricsServer()` serves five HTTP endpoints on the configured port. They are all also useful for ad-hoc inspection with `curl`.
 
 | Path | Content |
 |---|---|
-| `/stats` | JSON — per-pipe progress, speed, portal query, SDK version. This is what [Pipes UI](../../guides/basic-development/pipes-ui) polls. |
-| `/metrics` | Prometheus text — built-in `sqd_*` series plus any custom metrics you registered. Scrape this from Prometheus. |
-| `/profiler` | JSON — recent per-batch span trees. See [Profiling](../../guides/advanced-topics/profiling). Empty when profiling is disabled. |
+| `/stats` | JSON: per-pipe progress, speed, portal query, SDK version. This is what [Pipes UI](../../guides/basic-development/pipes-ui) polls. |
+| `/metrics` | Prometheus text: built-in `sqd_*` series plus any custom metrics you registered. Scrape this from Prometheus. |
+| `/profiler` | JSON: recent per-batch span trees. See [Profiling](../../guides/advanced-topics/profiling). Empty when profiling is disabled. |
+| `/preview/transformation` | JSON: a data preview (truncated sample) from the latest batch's transformation plus batch stats (block range, block count, byte size). Rendered by [Pipes UI](../../guides/basic-development/pipes-ui). |
 | `/health` | Responds with `ok`. |
 
 ## Custom metrics

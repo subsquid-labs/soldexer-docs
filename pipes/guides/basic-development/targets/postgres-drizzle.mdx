@@ -13,12 +13,12 @@ npm install -D drizzle-kit @types/pg
 At a glance, the pipeline looks like this:
 
 ```ts
-await solanaPortalSource({ ... }).pipeTo(
+await solanaPortalStream({ ... }).pipeTo(
   drizzleTarget({
     db: drizzle('postgresql://...'),
     tables: [swapsTable],
     onData: async ({ tx, data }) => {
-      for (const batch of batchForInsert(data.swap)) {
+      for (const batch of chunkForInsert(data.swap)) {
         await tx.insert(swapsTable).values(batch.map(...))
       }
     },
@@ -35,27 +35,29 @@ Define your tables with Drizzle ORM. Every table needs a primary key, and every 
 import { bigint, integer, pgTable, primaryKey, varchar } from 'drizzle-orm/pg-core'
 
 const swapsTable = pgTable('swaps', {
-  slot:             bigint({ mode: 'bigint' }).notNull(),
-  instructionIndex: integer().notNull(),
-  programId:        varchar().notNull(),
-}, (t) => [primaryKey({ columns: [t.slot, t.instructionIndex] })])
+  slot:               bigint({ mode: 'bigint' }).notNull(),
+  transactionIndex:   integer().notNull(),
+  instructionAddress: varchar().notNull(),
+  programId:          varchar().notNull(),
+}, (t) => [primaryKey({ columns: [t.slot, t.transactionIndex, t.instructionAddress] })])
 ```
 
 
-## `onData` and `batchForInsert` {#ondata}
+## `onData` and `chunkForInsert` {#ondata}
 
-`onData` runs inside a serializable transaction. Use `batchForInsert` to split data arrays into chunks that fit within PostgreSQL's 32,767-parameter limit — chunk size is calculated automatically from the number of columns:
+`onData` runs inside a serializable transaction. Use `chunkForInsert` to split data arrays into chunks that fit within PostgreSQL's 32,767-parameter limit — chunk size is calculated automatically from the number of columns:
 
 ```ts
-import { batchForInsert, drizzleTarget } from '@subsquid/pipes/targets/drizzle/node-postgres'
+import { chunkForInsert, drizzleTarget } from '@subsquid/pipes/targets/drizzle/node-postgres'
 
 onData: async ({ tx, data }) => {
-  for (const batch of batchForInsert(data.swap)) {
+  for (const batch of chunkForInsert(data.swap)) {
     await tx.insert(swapsTable).values(
       batch.map((d) => ({
-        slot:             BigInt(d.block.slot),
-        instructionIndex: d.instruction.instructionIndex,
-        programId:        d.programId,
+        slot:               BigInt(d.block.number),
+        transactionIndex:   d.rawInstruction.transactionIndex,
+        instructionAddress: d.rawInstruction.instructionAddress.join('.'),
+        programId:          d.programId,
       })),
     )
   }
@@ -63,10 +65,10 @@ onData: async ({ tx, data }) => {
 ```
 
 
-Pass an explicit second argument to `batchForInsert` to cap chunk size:
+Pass an explicit second argument to `chunkForInsert` to cap chunk size:
 
 ```ts
-for (const batch of batchForInsert(data.transfers, 100)) { ... }
+for (const batch of chunkForInsert(data.transfers, 100)) { ... }
 ```
 
 ## `tables`
@@ -116,35 +118,39 @@ drizzleTarget({
 ## Complete example
 
 ```ts expandable
-import { solanaInstructionDecoder, solanaPortalSource } from '@subsquid/pipes/solana'
-import { batchForInsert, drizzleTarget } from '@subsquid/pipes/targets/drizzle/node-postgres'
+import { solanaInstructionDecoder, solanaPortalStream } from '@subsquid/pipes/solana'
+import { chunkForInsert, drizzleTarget } from '@subsquid/pipes/targets/drizzle/node-postgres'
 import { drizzle } from 'drizzle-orm/node-postgres'
 import { bigint, integer, pgTable, primaryKey, varchar } from 'drizzle-orm/pg-core'
+import * as orcaWhirlpool from './abi/orca_whirlpool/index.js'
 
 const swapsTable = pgTable('swaps', {
-  slot:             bigint({ mode: 'bigint' }).notNull(),
-  instructionIndex: integer().notNull(),
-  programId:        varchar().notNull(),
-}, (t) => [primaryKey({ columns: [t.slot, t.instructionIndex] })])
+  slot:               bigint({ mode: 'bigint' }).notNull(),
+  transactionIndex:   integer().notNull(),
+  instructionAddress: varchar().notNull(),
+  programId:          varchar().notNull(),
+}, (t) => [primaryKey({ columns: [t.slot, t.transactionIndex, t.instructionAddress] })])
 
-await solanaPortalSource({
+await solanaPortalStream({
+  id: 'orca-swaps-drizzle',
   portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
   outputs: solanaInstructionDecoder({
     range: { from: '340000000' },
-    programId: '...',
-    instructions: { swap: swapInstruction },
+    programId: orcaWhirlpool.programId,
+    instructions: { swap: orcaWhirlpool.instructions.swap },
   }),
 }).pipeTo(
   drizzleTarget({
     db: drizzle('postgresql://postgres:postgres@localhost:5432/postgres'),
     tables: [swapsTable],
     onData: async ({ tx, data }) => {
-      for (const batch of batchForInsert(data.swap)) {
+      for (const batch of chunkForInsert(data.swap)) {
         await tx.insert(swapsTable).values(
           batch.map((d) => ({
-            slot:             BigInt(d.block.slot),
-            instructionIndex: d.instruction.instructionIndex,
-            programId:        d.programId,
+            slot:               BigInt(d.block.number),
+            transactionIndex:   d.rawInstruction.transactionIndex,
+            instructionAddress: d.rawInstruction.instructionAddress.join('.'),
+            programId:          d.programId,
           })),
         )
       }

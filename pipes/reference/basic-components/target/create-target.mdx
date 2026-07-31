@@ -3,7 +3,7 @@ title: "createTarget"
 description: "Use createTarget in a Solana Pipes SDK pipeline."
 ---
 
-Build a custom data sink. A target drains batches from the pipe and is responsible for persisting them.
+Build a custom data target. A target drains batches from the pipe and is responsible for persisting them.
 
 ```ts
 createTarget<In>(config: Target<In>): Target<In>
@@ -12,7 +12,7 @@ createTarget<In>(config: Target<In>): Target<In>
 **Config fields:**
 
 - `write`: (required) Async function `({ read, logger }) => Promise<void>`. Iterate the stream by calling `read()` and consuming `{ data, ctx }` batches. The function returns when the stream ends.
-- `fork`: (optional) `(previousBlocks: BlockCursor[]) => Promise<BlockCursor | null>`. Called when the source detects a chain reorg. Return the last safe cursor to roll back to, or `null` if no common ancestor can be determined (the stream will throw). See [Fork handling](../../../guides/architecture-deep-dives/fork-handling). You don't need this callback when the source is configured to [read only finalized blocks](../source#finalized-blocks).
+- `resolveFork`: (optional) `(canonicalBlocks: BlockCursor[]) => Promise<BlockCursor | null>`. Called when the source detects a chain reorg. `canonicalBlocks` is the portal's view of the canonical chain (a.k.a. `previousBlocks` in Portal API `/stream` 409 responses). Find the common ancestor, roll back everything persisted above it, and return the cursor to resume from — or `null` if no common ancestor can be determined (the stream will throw). See [Fork handling](../../../guides/architecture-deep-dives/fork-handling). You don't need this callback when the source is configured to [read only finalized blocks](../source#finalized-blocks).
 
 ## The `write` context
 
@@ -67,9 +67,9 @@ const target = createTarget({
       )
     }
   },
-  fork: async (previousBlocks) => {
+  resolveFork: async (canonicalBlocks) => {
     // Return a cursor from your persisted state; null to fail hard.
-    return previousBlocks[previousBlocks.length - 1] ?? null
+    return canonicalBlocks[canonicalBlocks.length - 1] ?? null
   },
 })
 ```

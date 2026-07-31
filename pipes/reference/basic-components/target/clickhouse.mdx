@@ -15,15 +15,13 @@ import { clickhouseTarget } from '@subsquid/pipes/targets/clickhouse'
 clickhouseTarget<T>({
   client: ClickHouseClient,
   onStart?: (ctx: { store: ClickhouseStore; logger: Logger }) => unknown | Promise<unknown>,
-  onData: (ctx: { store: ClickhouseStore; data: T; ctx: Ctx }) => unknown | Promise<unknown>,
+  onData: (ctx: { store: ClickhouseStore; data: T; ctx: HookContext }) => unknown | Promise<unknown>,
   onRollback?: (ctx: {
-    type: 'offset_check' | 'blockchain_fork'
+    reason: 'recovery' | 'fork'
     store: ClickhouseStore
     safeCursor: BlockCursor
-    /** @deprecated Use `safeCursor` instead. */
-    cursor: BlockCursor
   }) => unknown | Promise<unknown>,
-  settings?: Settings,
+  settings?: ClickhouseSettings,
 })
 ```
 
@@ -32,16 +30,16 @@ clickhouseTarget<T>({
 | `client` | Yes | Client from `@clickhouse/client`. |
 | `onStart` | No | Runs once before processing starts. Use for table creation or other setup. |
 | `onData` | Yes | Called for each batch. |
-| `onRollback` | No | Called on startup (`'offset_check'`) and on each fork (`'blockchain_fork'`). |
-| `settings` | No | Configuration for the internal cursor state table. See `Settings` below. |
+| `onRollback` | No | Called on every restart with a persisted cursor (`reason: 'recovery'`) and on each fork (`reason: 'fork'`). |
+| `settings` | No | Configuration for the internal cursor state table. See `ClickhouseSettings` below. |
 
-**`Settings`:**
+**`ClickhouseSettings`:**
 
 | Field | Default | Description |
 |-------|---------|-------------|
 | `database` | Client's configured database | ClickHouse database for the state table. |
 | `table` | `'sync'` | Name of the state table. |
-| `id` | `'stream'` | Stream identifier within the state table. |
+| `id` | Pipe's source `id` | Stream identifier within the state table. An explicit value always wins; otherwise the pipe's source `id` is used. Cursors stored under the legacy `'stream'` key by older SDK versions are migrated automatically on first resume. |
 | `maxRows` | `10000` | Maximum rows retained per stream id in the state table. |
 
 ## `ClickhouseStore` methods
@@ -51,6 +49,7 @@ clickhouseTarget<T>({
 | `store.insert(params)` | Queues an insert. Non-blocking — returns a `Promise` but need not be awaited inside `onData`; inserts are flushed when the target closes. |
 | `store.query(params)` | Passthrough to `client.query()`. |
 | `store.command(params)` | Passthrough to `client.command()`. |
-| `store.removeAllRows({ tables, where, params? })` | Cancels rows matching `where` by re-inserting them with `sign = -1`. Requires `CollapsingMergeTree`. |
+| `store.removeAllRows({ tables, where, params? })` | Removes rows matching `where`. Engine-aware: on `CollapsingMergeTree`-family tables with a `sign` column it inserts cancel rows (`sign = -1`) — the only mechanism that propagates through materialized views; on any other engine it falls back to a lightweight `DELETE` with a logged warning (requires ClickHouse ≥ 23.3); `Distributed` tables are rejected. |
+| `store.ensureRollbackIndex({ table, column? })` | Eagerly creates the minmax skip index (default column `block_number`) that rollbacks otherwise create on first use. Call in `onStart` for existing large tables to avoid a slow first rollback. |
 | `store.removeAllRowsByQuery({ table, query, params? })` | Like `removeAllRows`, but uses a custom `SELECT` to identify the rows to cancel. |
 | `store.executeFiles(dir)` | Executes all `.sql` files found in `dir`. |

@@ -1,17 +1,17 @@
 ---
-title: "Source"
-description: "API reference for Solana Portal source"
+title: "Portal stream"
+description: "API reference for Solana portal streams"
 ---
 
-The source component connects to SQD Portal and streams blockchain data to your pipeline. It's the starting point for all Pipes SDK data flows.
+The portal stream connects to SQD Portal and streams blockchain data to your pipeline. It's the starting point for all Pipes SDK data flows.
 
 
-## solanaPortalSource
+## solanaPortalStream
 
-Create a Portal source for Solana chains.
+Create a portal stream for Solana chains.
 
 ```ts
-solanaPortalSource(config: SolanaPortalSourceConfig): Source
+solanaPortalStream(config: SolanaPortalStreamConfig): PortalStream
 ```
 
 
@@ -20,23 +20,34 @@ solanaPortalSource(config: SolanaPortalSourceConfig): Source
 - `id`: (required) Pipeline ID. Must be unique within any infra shared with other pipelines (DB, logging sinks etc).
 - `portal`: (required) Portal API URL or config object.
   - String: `"https://portal.sqd.dev/datasets/ethereum-mainnet"`
-  - Object: `{ url: string, finalized?: boolean }`. When `finalized: true` is set the stream will consist of finalized blocks only and none of the [fork handling machinery](../../guides/architecture-deep-dives/fork-handling) will be required.
+  - Object with the following fields:
+
+    | Field | Default | Description |
+    |---|---|---|
+    | `url` | required | Portal dataset URL. |
+    | `finalized` | `false` | When `true`, the stream consists of finalized blocks only and none of the [fork handling machinery](../../guides/architecture-deep-dives/fork-handling) is required. |
+    | `http` | | Custom `HttpClient` instance or HTTP client options. |
+    | `maxBytes` | `10_485_760` (10 MB) | Maximum number of bytes to buffer before flushing a batch. |
+    | `maxIdleTimeMs` | `300` | Maximum time (ms) between stream data before the buffered batch is returned. |
+    | `maxWaitTimeMs` | `5000` | Maximum time (ms) to wait before the buffered batch is returned. |
+    | `headPollIntervalMs` | `0` | Interval (ms) for polling the chain head. |
 
 - `outputs`: (required) A single query-transformers chain combo or record of named outputs.
 - `cache`: (optional) Portal cache instance. If supplied, saves portal responses locally and reuses them when the pipeline re-runs.
 - `logger`: (optional) A pino-compatible `Logger` instance or a log level string. Accepted level values: `'fatal'`, `'error'`, `'warn'`, `'info'`, `'debug'`, `'trace'`, `'silent'`, `false`, `null`. Passing `false` or `null` silences all log output. When omitted, a default console logger is used.
 - `metrics`: (optional) `metricsServer()` instance for exposing Prometheus metrics.
-- `progress`: (optional) Options for progress tracking.
-- `profiler`: (optional) Enable the built-in per-batch profiler. See [Profiling](../../guides/advanced-topics/profiling).
+- `progress`: (optional) Options for progress tracking: `{ interval?: number, onProgress?, onStart? }`. `interval` defaults to 5000 ms.
+- `profiler`: (optional) Enable the built-in per-batch profiler (`boolean`), or pass span hooks such as [`opentelemetryProfiler()`](../../guides/advanced-topics/tracing). See [Profiling](../../guides/advanced-topics/profiling).
 
 
 **Example:**
 
 ```ts
-import { solanaPortalSource } from "@subsquid/pipes/solana";
+import { solanaInstructionDecoder, solanaPortalStream } from "@subsquid/pipes/solana";
 import { portalSqliteCache } from "@subsquid/pipes/portal-cache/node";
+import * as orcaWhirlpool from "./abi/orca_whirlpool/index.js";
 
-const source = solanaPortalSource({
+const stream = solanaPortalStream({
   id: "orca-swaps",
   portal: "https://portal.sqd.dev/datasets/solana-mainnet",
   outputs: solanaInstructionDecoder({
@@ -51,10 +62,10 @@ const source = solanaPortalSource({
 
 ### Finalized Blocks
 
-You can configure the source to only receive finalized blocks:
+You can configure the stream to only receive finalized blocks:
 
 ```ts
-const source = solanaPortalSource({
+const stream = solanaPortalStream({
   portal: {
     finalized: true,
     url: 'https://portal.sqd.dev/datasets/solana-mainnet'
@@ -68,12 +79,12 @@ Using finalized blocks eliminates the need for rollback handlers in your targets
 
 ### pipe()
 
-Chain a single [whole-pipe transformer](./transformer) to the source.
+Chain a single [whole-pipe transformer](./transformer) to the stream.
 
 ```ts
-source.pipe(transformer)
+stream.pipe(transformer)
 ```
-The returned value behaves exactly as the source.
+The returned value behaves exactly as the stream.
 
 See also: [Stateful transformers](../../guides/advanced-topics/stateful-transforms).
 
@@ -82,7 +93,7 @@ See also: [Stateful transformers](../../guides/advanced-topics/stateful-transfor
 Connect the pipeline to a [target](./target).
 
 ```ts
-source.pipeTo(target)
+stream.pipeTo(target)
 ```
 
 This is a terminal operation: you cannot continue piping after calling this method.

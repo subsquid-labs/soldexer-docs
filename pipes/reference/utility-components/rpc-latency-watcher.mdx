@@ -16,7 +16,7 @@ import { solanaRpcLatencyWatcher } from '@subsquid/pipes/solana'
 ```ts
 function solanaRpcLatencyWatcher(options: {
   rpcUrl: string[]
-}): RpcLatencyWatcher
+}): Transformer
 ```
 
 ## Parameters
@@ -27,7 +27,7 @@ function solanaRpcLatencyWatcher(options: {
 
 ## Return Value
 
-Returns a transformer that can be piped to add latency data to the stream.
+Returns a query-transformer combo that already includes the block query it needs. Pass it directly as the source's `outputs`. You can chain `.pipe()` transforms to it.
 
 ## Output Data Structure
 
@@ -37,10 +37,14 @@ Each output contains:
 {
   number: number,           // Slot number
   timestamp: Date,          // Block timestamp
+  portal: {
+    receivedAt: Date,       // When the block arrived from the Portal
+  },
   rpc: Array<{
     url: string,            // RPC endpoint URL
-    receivedAt: Date,       // When block was received from RPC
-    portalDelayMs: number,  // Delay between RPC and Portal (ms)
+    hash?: string,          // Not set on Solana: slot update notifications carry no hash
+    receivedAt?: Date,      // When the block was received from this RPC
+    portalDelayMs: number,  // Delay between RPC arrival and Portal availability (ms)
   }>
 }
 ```
@@ -48,16 +52,15 @@ Each output contains:
 ## Basic Usage
 
 ```ts
-import { solanaPortalSource, solanaRpcLatencyWatcher } from '@subsquid/pipes/solana'
+import { solanaPortalStream, solanaRpcLatencyWatcher } from '@subsquid/pipes/solana'
 
-const stream = solanaPortalSource({
+const stream = solanaPortalStream({
+  id: 'solana-latency',
   portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
-  outputs: new SolanaQueryBuilder().addFields({ block: { number: true, hash: true, timestamp: true } }).includeAllBlocks({ from: 'latest' }).build(),
-}).pipe(
-  solanaRpcLatencyWatcher({
+  outputs: solanaRpcLatencyWatcher({
     rpcUrl: ['https://api.mainnet-beta.solana.com'],
-  })
-)
+  }),
+})
 
 for await (const { data } of stream) {
   if (!data) continue
@@ -84,32 +87,33 @@ BLOCK DATA: 369,377,455 / Fri Sep 26 2025 15:31:36 GMT+0400
 Monitor multiple RPC providers simultaneously:
 
 ```ts
-const stream = solanaPortalSource({
+const stream = solanaPortalStream({
+  id: 'solana-latency',
   portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
-  outputs: new SolanaQueryBuilder().addFields({ block: { number: true, hash: true, timestamp: true } }).includeAllBlocks({ from: 'latest' }).build(),
-}).pipe(
-  solanaRpcLatencyWatcher({
+  outputs: solanaRpcLatencyWatcher({
     rpcUrl: [
       'https://api.mainnet-beta.solana.com',
       'https://solana-mainnet.rpc.extrnode.com',
     ],
-  })
-)
+  }),
+})
 ```
 
 ## Metrics Integration
 
-Export latency data to Prometheus or other monitoring systems:
+Export latency data to Prometheus via the built-in metrics registry. See the [Data freshness monitoring guide](../../guides/advanced-topics/latency-monitoring) for the full example:
 
 ```ts
-const stream = solanaPortalSource({
+import { solanaPortalStream, solanaRpcLatencyWatcher } from '@subsquid/pipes/solana'
+import { metricsServer } from '@subsquid/pipes/metrics/node'
+
+const stream = solanaPortalStream({
+  id: 'solana-latency',
   portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
-  outputs: new SolanaQueryBuilder().addFields({ block: { number: true, hash: true, timestamp: true } }).includeAllBlocks({ from: 'latest' }).build(),
-}).pipe(
-  solanaRpcLatencyWatcher({
+  outputs: solanaRpcLatencyWatcher({
     rpcUrl: ['https://api.mainnet-beta.solana.com'],
   }).pipe({
-    profiler: { id: 'expose metrics' },
+    profiler: { name: 'expose metrics' },
     transform: (data, { metrics }) => {
       if (!data) return
 
@@ -125,59 +129,9 @@ const stream = solanaPortalSource({
 
       return data
     },
-  })
-)
-```
-
-## Prometheus Export
-
-Full example with HTTP metrics endpoint:
-
-```ts
-import { solanaPortalSource, solanaRpcLatencyWatcher } from '@subsquid/pipes/solana'
-import { Registry, Counter } from 'prom-client'
-import http from 'http'
-
-const registry = new Registry()
-const latencyCounter = new Counter({
-  name: 'portal_latency_ms_total',
-  help: 'Total Portal latency in milliseconds',
-  registers: [registry],
+  }),
+  metrics: metricsServer({ port: 9090 }),
 })
-
-const stream = solanaPortalSource({
-  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
-  outputs: new SolanaQueryBuilder().addFields({ block: { number: true, hash: true, timestamp: true } }).includeAllBlocks({ from: 'latest' }).build(),
-}).pipe(
-  solanaRpcLatencyWatcher({
-    rpcUrl: ['https://api.mainnet-beta.solana.com'],
-  }).pipe({
-    transform: (data) => {
-      if (!data) return
-
-      for (const rpc of data.rpc) {
-        latencyCounter.inc(rpc.portalDelayMs)
-      }
-
-      return data
-    },
-  })
-)
-
-// Expose metrics endpoint
-const server = http.createServer(async (req, res) => {
-  if (req.url === '/metrics') {
-    res.setHeader('Content-Type', registry.contentType)
-    res.end(await registry.metrics())
-  } else {
-    res.end('OK')
-  }
-})
-server.listen(9090)
-
-for await (const { data } of stream) {
-  // Process blocks
-}
 ```
 
 ## How It Works
@@ -190,7 +144,7 @@ The RPC latency watcher:
 4. Reports the delay as `portalDelayMs`
 
 <Warning>
-The measured values include client-side network latency. For RPC, only the arrival time of the block is measured—this does not capture the node's internal processing latency.
+The measured values include client-side network latency. For RPC, only the arrival time of the block is measured. This does not capture the node's internal processing latency.
 </Warning>
 
 ## Use Cases

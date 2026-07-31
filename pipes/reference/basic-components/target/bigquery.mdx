@@ -1,0 +1,128 @@
+---
+title: "bigqueryTarget"
+description: "BigQuery target for Pipes SDK"
+---
+
+Write pipe output to Google BigQuery with fork-aware reorg handling. The target uses the BigQuery Storage Write API with committed streams: one long-lived stream per table, opened lazily on first write and reused for every batch.
+
+```ts
+import { bigqueryTarget } from '@subsquid/pipes/targets/bigquery'
+```
+
+`@google-cloud/bigquery` and `@google-cloud/bigquery-storage` are optional peer dependencies. Install them alongside the SDK:
+
+```bash
+npm install @google-cloud/bigquery @google-cloud/bigquery-storage
+```
+
+## `bigqueryTarget`
+
+```ts
+bigqueryTarget<T>({
+  client: { bigquery: BigQuery, writer?: WriterClient },
+  dataset: string,
+  tables: TrackedTable[],
+  settings?: BigQuerySettings,
+  onStart?: (ctx: { store: BigQueryWriter; logger: Logger }) => unknown | Promise<unknown>,
+  onData: (ctx: { store: BigQueryWriter; data: T; ctx: HookContext }) => unknown | Promise<unknown>,
+  onBeforeRollback?: (ctx: { cursor: BlockCursor }) => unknown | Promise<unknown>,
+  onAfterRollback?: (ctx: { cursor: BlockCursor }) => unknown | Promise<unknown>,
+})
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `client` | Yes | `{ bigquery }` from `@google-cloud/bigquery`. `writer` (a Storage Write API `WriterClient`) is optional; when omitted, the target constructs one with the same project ID and the default endpoint. |
+| `dataset` | Yes | BigQuery dataset that hosts both the tracked tables and the sync table. The target creates tables on demand but does not create the dataset. |
+| `tables` | Yes | Tracked tables (see below). Auto-created on first run if missing; validated against the declared schema on every restart. Writing to a non-listed table from `onData` throws. |
+| `settings` | No | State table and partitioning settings (see below). |
+| `onStart` | No | Runs once before processing starts. |
+| `onData` | Yes | Called for each batch. Use `store.insert(table, rows)` to buffer rows; they are committed when `onData` returns. |
+| `onBeforeRollback` / `onAfterRollback` | No | Hooks around the fork `DELETE` phase, called with the safe cursor. |
+
+**`TrackedTable`:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `table` | Yes | Unqualified table name. |
+| `blockNumberColumn` | Yes | Column used for partitioning and reorg `DELETE` scoping. Forced to `INT64 NOT NULL` regardless of the declared type. |
+| `schema` | Yes | BigQuery field definitions (`TableField[]`) used for auto-creation and schema validation. |
+| `clusterBy` | No | `CLUSTER BY` columns. Recommended for natural primary keys. |
+
+**`settings`:**
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `state.table` | `'sync'` | Sync (cursor) table name. |
+| `state.id` | source `id` | Stream identifier within the sync table. |
+| `state.maxRows` | `10_000` | Maximum sync rows retained per stream id. |
+| `partitioning.bucketSize` | `10_000` | Width of each `RANGE_BUCKET` partition, in blocks. |
+| `partitioning.maxBlocks` | `100_000_000` | Upper bound of the partition range. |
+| `partitioning` | | Set to `false` to disable partitioning DDL. Not recommended: fork `DELETE`s then scan the whole table. |
+
+## Fork handling
+
+On a reorg, the target opens an `IN_FLIGHT_ROLLBACK` row in the sync table, runs `DELETE FROM <table> WHERE <blockNumberColumn> BETWEEN safe+1 AND upper` on every tracked table in parallel, then marks the rollback complete. If the process dies between the two markers, the next startup re-runs the bounded `DELETE`s idempotently. See [Fork handling](../../../guides/architecture-deep-dives/fork-handling) for how the finalization watermark is resolved and enforced across targets.
+
+## Example
+
+```ts expandable
+import { BigQuery } from '@google-cloud/bigquery'
+import { solanaInstructionDecoder, solanaPortalStream } from '@subsquid/pipes/solana'
+import { bigqueryTarget } from '@subsquid/pipes/targets/bigquery'
+import * as orcaWhirlpool from './abi/orca_whirlpool/index.js'
+
+const bigquery = new BigQuery({ projectId: 'my-gcp-project' })
+
+await solanaPortalStream({
+  id: 'orca-swaps',
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+  outputs: solanaInstructionDecoder({
+    range: { from: '340,000,000' },
+    programId: orcaWhirlpool.programId,
+    instructions: { swap: orcaWhirlpool.instructions.swap },
+  }),
+}).pipeTo(
+  bigqueryTarget({
+    client: { bigquery },
+    dataset: 'orca_swaps',
+    tables: [
+      {
+        table: 'swaps',
+        blockNumberColumn: 'slot',
+        schema: [
+          { name: 'slot', type: 'INT64', mode: 'REQUIRED' },
+          { name: 'transaction_index', type: 'INT64', mode: 'REQUIRED' },
+          { name: 'instruction_address', type: 'STRING', mode: 'REQUIRED' },
+          // TIMESTAMP wire format is INT64 microseconds since epoch
+          { name: 'block_timestamp', type: 'TIMESTAMP', mode: 'REQUIRED' },
+          { name: 'program_id', type: 'STRING', mode: 'REQUIRED' },
+        ],
+        clusterBy: ['program_id'],
+      },
+    ],
+    onData: async ({ store, data }) => {
+      store.insert(
+        'swaps',
+        data.swap.map((d) => ({
+          slot: d.block.number,
+          transaction_index: d.rawInstruction.transactionIndex,
+          instruction_address: d.rawInstruction.instructionAddress.join('.'),
+          // The Storage Write API does not parse Date/ISO strings; pass microseconds
+          block_timestamp: d.timestamp ? d.timestamp.getTime() * 1000 : 0,
+          program_id: d.programId,
+        })),
+      )
+    },
+  }),
+)
+```
+
+
+Full runnable example: [`16.bigquery.example.ts`](https://github.com/subsquid-labs/pipes-sdk/blob/main/docs/examples/evm/16.bigquery.example.ts).
+
+## Notes
+
+- `store.insert(table, rows)` is synchronous and buffers rows per table; the commit runs once `onData` returns. It throws immediately if the table is not declared in `tables`.
+- The default `BIGNUMERIC` precision holds up to 38 integer digits. `uint256` values (e.g. the `2^256-1` "infinite approval" sentinel) overflow it; store the exact decimal as a `STRING` column, or clamp before insertion.
+- `TIMESTAMP` columns take `INT64` microseconds since epoch on the write path; the Storage Write API JSONWriter does not parse `Date` objects or ISO strings.

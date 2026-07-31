@@ -1,0 +1,135 @@
+---
+title: "parquetTarget"
+description: "Parquet file target for Pipes SDK"
+---
+
+Write pipe output to rotating, finalized-only Parquet files on the local filesystem. Each file is named by its block range (`<min>-<max>.parquet`) and is immutable once published. The files can be read directly by DuckDB, Spark, Athena, and ClickHouse's `s3()` function without an import step.
+
+```ts
+import { parquetTarget } from '@subsquid/pipes/targets/parquet'
+```
+
+`@dsnp/parquetjs` is an optional peer dependency. Install it alongside the SDK:
+
+```bash
+npm install @dsnp/parquetjs
+```
+
+## `parquetTarget`
+
+```ts
+parquetTarget<T>({
+  dir: string,
+  tables: ParquetTable[],
+  settings?: ParquetSettings,
+  onStart?: (ctx: { store: ParquetStore; logger: Logger }) => unknown | Promise<unknown>,
+  onData: (ctx: { store: ParquetStore; data: T; ctx: HookContext }) => unknown | Promise<unknown>,
+})
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `dir` | Yes | Output directory, one pipe per directory. Holds a `<table>/` sub-directory per table plus a state file with the durable cursor. |
+| `tables` | Yes | Declared tables with explicit schemas (see below). Writing to an undeclared table from `onData` throws. |
+| `settings` | No | Rotation, compression, and row group settings (see below). |
+| `onStart` | No | Runs once before processing starts. |
+| `onData` | Yes | Called for each batch. Use `store.insert(table, rows)` to stage rows. |
+
+**`ParquetTable`:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `table` | Yes | Table name. Becomes a sub-directory `<dir>/<table>/` holding its `.parquet` files. |
+| `schema` | Yes | Map of column name to `{ type, optional?, compression? }`. Types include `INT32`, `INT64`, `UTF8`, `TIMESTAMP`, `DATE`, `JSON`, and other Parquet primitive types, plus nested `STRUCT` and `LIST` columns. |
+| `blockNumberColumn` | No | Column carrying the block number, used for finalization, file naming, and recovery. Must be a required integer column. Defaults to `'blockNumber'`. |
+
+**`ParquetSettings`:**
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `rollover.maxBytes` | `128 MiB` | Soft byte cap per file, checked at each batch boundary. |
+| `rollover.maxRows` | | Optional row cap per file. |
+| `rollover.intervalMs` | | Optional wall-clock checkpoint floor (ms). Recommended for live tailing so finalized data is not stuck in an open file. |
+| `rollover.intervalBlocks` | | Optional block-count checkpoint floor. |
+| `rowGroupSize` | `100_000` | Rows per row group; bounds the writer's memory. |
+| `compression` | `'SNAPPY'` | Default per-column codec: `'UNCOMPRESSED'`, `'SNAPPY'`, `'GZIP'`, or `'BROTLI'`. |
+| `id` | source `id` | Namespace for the state file, so multiple pipes can share one `dir`. |
+
+## Behavior
+
+- **Finalized-only.** A row is written only once its block is at or below the portal's finalized head, so a reorg never touches a file on disk. On a live (`from: 'latest'`) range, the unfinalized tail is held in memory until it finalizes; a reorg drops the in-memory buffer. See [Fork handling](../../../guides/architecture-deep-dives/fork-handling) for how the finalization watermark is tracked.
+- **Constant memory.** Rows stream to a temp file that rotates by byte size, so a multi-gigabyte backfill never lands wholly in RAM.
+- **Crash-safe.** A durable cursor advances only at a checkpoint. On restart, any file above the cursor is dropped and re-fetched.
+
+<Warning>
+`onData` must be a pure function of the batch for finalized blocks (no wall clock or randomness affecting a row's identity). Recovery re-processes finalized blocks and relies on regenerating identical rows; Parquet has no server-side dedupe.
+</Warning>
+
+## Example
+
+```ts expandable
+import { solanaInstructionDecoder, solanaPortalStream } from '@subsquid/pipes/solana'
+import { parquetTarget } from '@subsquid/pipes/targets/parquet'
+import * as orcaWhirlpool from './abi/orca_whirlpool/index.js'
+
+await solanaPortalStream({
+  id: 'orca-parquet',
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+  outputs: solanaInstructionDecoder({
+    range: { from: '340,000,000' },
+    programId: orcaWhirlpool.programId,
+    instructions: { swap: orcaWhirlpool.instructions.swap },
+  }),
+}).pipeTo(
+  parquetTarget({
+    dir: './parquet-out',
+    tables: [
+      {
+        table: 'swaps',
+        blockNumberColumn: 'slot',
+        schema: {
+          slot: { type: 'INT64' },
+          transactionIndex: { type: 'INT32' },
+          instructionAddress: { type: 'UTF8' },
+          timestamp: { type: 'TIMESTAMP', optional: true },
+          programId: { type: 'UTF8' },
+        },
+      },
+    ],
+    settings: {
+      rollover: { maxBytes: 8 * 1024 * 1024 },
+      compression: 'SNAPPY',
+    },
+    onData: ({ store, data }) => {
+      store.insert(
+        'swaps',
+        data.swap.map((d) => ({
+          slot: d.block.number,
+          transactionIndex: d.rawInstruction.transactionIndex,
+          instructionAddress: d.rawInstruction.instructionAddress.join('.'),
+          timestamp: d.timestamp ?? null,
+          programId: d.programId,
+        })),
+      )
+    },
+  }),
+)
+```
+
+
+Query the output directly with DuckDB:
+
+```bash
+duckdb -c "SELECT count(*) FROM './parquet-out/swaps/*.parquet'"
+```
+
+Full runnable example: [`17.parquet.example.ts`](https://github.com/subsquid-labs/pipes-sdk/blob/main/docs/examples/evm/17.parquet.example.ts).
+
+## JS to Parquet input contract
+
+| Parquet type | JS input |
+|--------------|----------|
+| `INT64` | `number` or `bigint` |
+| `INT32` | `number` |
+| `TIMESTAMP` | `Date` (or `null` for an optional column) |
+| `UTF8` | `string` |

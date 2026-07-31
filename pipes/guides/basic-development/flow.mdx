@@ -4,7 +4,7 @@ description: "Follow a typical Solana Pipes SDK development workflow."
 ---
 
 Begin by making sure you know
-  - which on-chain data items (instructions, token balance updates etc) you need;
+  - which onchain data items (instructions, token balance updates etc) you need;
   - how you are going to transform these items into usable data, based on your business logic;
   - what is your preferred mode of consuming the transformed data.
 
@@ -18,9 +18,9 @@ Here are some things to keep in mind as you're developing the heart of your pipe
 
 Recall that there are two kinds of transforms in Pipes SDK:
  - **Per-query transforms** work on subsets of raw data. They can be bundled with their queries, making them logically self-contained and easily reusable.
- - **Whole pipe transforms** process outputs of all per-query transforms at the same time. This unlocks arbitrary data combinations, but it also means that that each such transform might need to be changed whenever any of the upstream transforms changes.
+ - **Whole pipe transforms** process outputs of all per-query transforms at the same time. This unlocks arbitrary data combinations, but it also means that each such transform might need to be changed whenever any of the upstream transforms changes.
 
-For maximum mainatainability you'll have to balance the following two objectives:
+For maximum maintainability you'll have to balance the following two objectives:
 
 1. Aim to push as much of your business logic into per-query transforms. Make the code of any whole pipe transforms as simple as possible.
 
@@ -52,7 +52,7 @@ A complete pipeline without a `.pipeTo` is a valid async iterator.
 
    Alternatively, configure the data source to use final data only:
    ```ts
-   const source = evmPortalSource({
+   const source = solanaPortalStream({
      portal: {
        url: '<portal_dataset_url>',
        finalized: true,
@@ -71,7 +71,7 @@ Use the [createTarget() function](../../reference/basic-components/target/create
 
    Alternatively, configure the data source to use final data only:
    ```ts
-   const source = evmPortalSource({
+   const source = solanaPortalStream({
      portal: {
        url: '<portal_dataset_url>',
        finalized: true,

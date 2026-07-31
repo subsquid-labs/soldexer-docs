@@ -1,0 +1,78 @@
+---
+title: "Dev runner"
+description: "Run multiple pipes in one process during development"
+---
+
+`devRunner` runs multiple pipes concurrently inside a single Node.js process, with per-pipe restart retries, a shared metrics server, and per-pipe scoped loggers.
+
+```ts
+import { PipeContext, devRunner } from '@subsquid/pipes/runtime/node'
+```
+
+<Warning>
+The dev runner is for local development only. All pipes share one JS thread, so a CPU-intensive pipe starves its neighbours, and an OS-level kill takes every pipe down together. For production, run each pipe as a separate process or container.
+</Warning>
+
+## Usage
+
+Declare each pipe as `{ id, params, handler }` and hand the list to `devRunner`:
+
+```ts
+const run = devRunner<Params>(pipes, { metrics: { port: 9090 } })
+await run.start()
+```
+
+Each handler receives a `PipeContext` with the pipe's `id`, its `params`, the shared `metrics` server, and a `logger` scoped to the pipe ID. Pass those into the source so all pipes report to one metrics endpoint:
+
+```ts expandable
+import { solanaInstructionDecoder, solanaPortalStream } from '@subsquid/pipes/solana'
+import { PipeContext, devRunner } from '@subsquid/pipes/runtime/node'
+import * as orcaWhirlpool from './abi/orca_whirlpool/index.js'
+
+export type Params = { dataset: string }
+
+async function swaps({ id, params, metrics, logger }: PipeContext<Params>) {
+  const stream = solanaPortalStream({
+    id,
+    portal: `https://portal.sqd.dev/datasets/${params.dataset}`,
+    metrics,
+    logger,
+    outputs: solanaInstructionDecoder({
+      range: { from: 'latest' },
+      programId: orcaWhirlpool.programId,
+      instructions: { swap: orcaWhirlpool.instructions.swap },
+    }),
+  })
+
+  for await (const { ctx, data } of stream) {
+    ctx.logger.debug(`fetched ${data.swap.length} swaps`)
+  }
+}
+
+async function main() {
+  const run = devRunner<Params>(
+    [{ id: 'solana', params: { dataset: 'solana-mainnet' }, handler: swaps }],
+    { metrics: { port: 9090 } },
+  )
+
+  await run.start()
+}
+
+main()
+```
+
+
+## Configuration
+
+```ts
+devRunner(pipes, config?)
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `retry` | `5` | Maximum number of restart attempts per pipe before the runner gives up and re-throws the error. Failures are retried per pipe; one pipe crashing does not restart the others. |
+| `metrics` | | [`metricsServer()`](../../reference/utility-components/metrics-server) options (`{ port?, enabled?, logger? }`). When provided, a single Prometheus server is shared by all pipes. When omitted, metrics are a no-op. |
+
+Each pipe declared in the runner shows up separately in [Pipes UI](./pipes-ui), keyed by its `id`.
+
+Full runnable example: [`12.runner.example.ts`](https://github.com/subsquid-labs/pipes-sdk/blob/main/docs/examples/evm/12.runner.example.ts).

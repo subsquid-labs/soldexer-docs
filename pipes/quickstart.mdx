@@ -1,6 +1,6 @@
 ---
 title: "Quickstart"
-description: "Build a Solana blockchain data pipeline with Pipes SDK."
+description: "Bootstrap a Pipes SDK project"
 ---
 
 # Using with AI
@@ -23,7 +23,7 @@ If you'd rather feed docs into a model directly, the static [`llms.txt`](https:/
 # Scaffolding with Pipes CLI
 
 <Note>
-`pipes-cli` is a work in progress.
+The 1.0 line ships under the npm `beta` tag, so the commands below pin `@beta`. It covers all three packages — `@subsquid/pipes`, `@subsquid/pipes-cli`, and `@subsquid/pipes-ui` — and generated projects depend on the same line. Without the pin, npm serves an older 1.0 alpha that does not accept the config shown here.
 </Note>
 
 In a few minutes, you'll have a running pipe that indexes Orca Whirlpool swap instructions on Solana mainnet into a local PostgreSQL database.
@@ -39,27 +39,26 @@ In a few minutes, you'll have a running pipe that indexes Orca Whirlpool swap in
 Run the CLI in the directory where you want the project folder to land:
 
 ```bash
-pnpx @subsquid/pipes-cli@1.0.0-alpha.4 init
+pnpx @subsquid/pipes-cli@beta init
 ```
 
-The CLI prompts for the project folder name, package manager (please stick to `pnpm` for now), sink (please use `ClickHouse` or `Postgres`), network type, network, and template; then installs dependencies and writes a runnable project.
+The CLI prompts for the project folder name, package manager (please stick to `pnpm` for now), target database (`ClickHouse` or `PostgreSQL`), network type, default network, and one or more templates; each template then asks for its own parameters (e.g. contract deployments and block ranges). It then writes a runnable project and installs dependencies.
 
 You can supply a JSON config instead of filling the prompts manually. Here's the configuration for Orca Whirlpool swap instructions mentioned above:
 
 ```bash
-pnpx @subsquid/pipes-cli@1.0.0-alpha.4 init --config '{
+pnpx @subsquid/pipes-cli@beta init --config '{
   "projectFolder": "orca-example",
   "packageManager": "pnpm",
-  "sink": "postgresql",
+  "target": "postgresql",
   "networkType": "svm",
-  "network": "solana-mainnet",
+  "defaultNetwork": "solana-mainnet",
   "templates": [
     {
       "templateId": "custom",
       "params": {
         "contracts": [
           {
-            "contractAddress": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
             "contractName": "OrcaWhirlpool",
             "contractEvents": [
               {
@@ -71,7 +70,12 @@ pnpx @subsquid/pipes-cli@1.0.0-alpha.4 init --config '{
                 ]
               }
             ],
-            "range": { "from": "latest" }
+            "deployments": [
+              {
+                "address": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+                "range": { "from": "latest" }
+              }
+            ]
           }
         ]
       }
@@ -81,16 +85,24 @@ pnpx @subsquid/pipes-cli@1.0.0-alpha.4 init --config '{
 ```
 
 
-`--config` also accepts a path to a JSON file.
+`--config` also accepts a path to a JSON file. Each contract is described by one or more *deployments* (address + block range), and the root `defaultNetwork` applies to all of them.
 
-To inspect the full config schema run
+The config schema is published at [cdn.subsquid.io/schemas/pipes_cli_config.json](https://cdn.subsquid.io/schemas/pipes_cli_config.json); to print it locally run
 ```
-pnpx @subsquid/pipes-cli@1.0.0-alpha.4 init --schema
+pnpx @subsquid/pipes-cli@beta init --schema
 ```
+
+Whichever way you configure the project, the CLI saves the resolved config to `pipes.config.json` in the project folder. To change the generated code later, edit that file and re-run
+
+```bash
+pnpx @subsquid/pipes-cli@beta init --config <project-folder>/pipes.config.json
+```
+
+Re-running on an existing pipes project regenerates the code in place and preserves your `.env`.
 
 ## Run the pipeline
 
-The generated project ships with a `docker-compose.yml` that brings up the sink database and the pipeline together:
+The generated project includes a `docker-compose.yml` that brings up the target database and the pipeline together:
 
 ```bash
 cd orca-example
@@ -115,7 +127,7 @@ The project layout:
 ```
 orca-example/
 ├── src/
-│   ├── index.ts        # the pipe — source, decoder, target
+│   ├── index.ts        # the pipe — stream, decoder, target
 │   ├── schemas.ts      # Drizzle table definitions
 │   ├── contracts/      # generated ABI bindings (per program ID)
 │   └── utils/
@@ -124,6 +136,7 @@ orca-example/
 ├── Dockerfile
 ├── drizzle.config.ts
 ├── package.json
+├── pipes.config.json   # the resolved CLI config — edit + re-run init to regenerate
 ├── .env                # DB_CONNECTION_STR — points at local Postgres
 └── README.md
 ```
@@ -140,14 +153,14 @@ const custom = solanaInstructionDecoder({
 }).pipe(enrichEvents)
 ```
 
-The decoder asks the Portal for `swap` instructions on the Orca Whirlpool program. `enrichEvents` (from `src/utils/`) reshapes each decoded instruction into a row matching the Drizzle table. See the [Pipe anatomy](./guides/basic-development/anatomy) and [Handling instructions](./guides/basic-development/handling-instructions) guides for more info on `instructionDecoder()`.
+The decoder asks the Portal for `swap` instructions on the Orca Whirlpool program. `enrichEvents` (from `src/utils/`) reshapes each decoded instruction into a row matching the Drizzle table. See the [Pipe anatomy](./guides/basic-development/anatomy) and [Handling instructions](./guides/basic-development/handling-instructions) guides for more info on `solanaInstructionDecoder()`.
 
 The `main()` function wires the decoder to a [drizzleTarget](./reference/basic-components/target/postgres-drizzle):
 
 ```ts
 export async function main() {
-  await solanaPortalSource({
-    id: 'solana-orca-pipe',
+  await solanaPortalStream({
+    id: '8babd3b7', // generated; keep it stable
     portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
     outputs: { custom },
   }).pipeTo(
@@ -155,7 +168,7 @@ export async function main() {
       db: drizzle(env.DB_CONNECTION_STR),
       tables: [orcaWhirlpoolSwapTable],
       onData: async ({ tx, data }) => {
-        for (const values of chunk(data.custom.swap)) {
+        for (const values of chunkForInsert(data.custom.swap)) {
           await tx.insert(orcaWhirlpoolSwapTable).values(values)
         }
       },
@@ -165,21 +178,21 @@ export async function main() {
 ```
 
 
-The `id` is a per-pipeline identifier — keep it stable so the [target's cursor](./guides/architecture-deep-dives/cursor-management) survives restarts. See [solanaPortalSource](./reference/basic-components/source) for the full source API and [Pipe anatomy](./guides/basic-development/anatomy) for how the pieces fit together.
+The `id` is a per-pipeline identifier (the CLI generates a random one). Keep it stable so the [target's cursor](./guides/architecture-deep-dives/cursor-management) survives restarts. See [Pipe anatomy](./guides/basic-development/anatomy) for how the pieces fit together.
 
 ## Other examples
 
 <AccordionGroup>
 <Accordion title="Token balances">
-The `tokenBalances` template indexes pre/post token balances directly from blocks — no program ID needed. The generated pipe uses [solanaQuery()](./reference/basic-components/query-builder) instead of an instruction decoder.
+The `tokenBalances` template indexes pre/post token balances directly from blocks, with no program ID needed. The generated pipe uses [solanaQuery()](./reference/basic-components/query-builder) instead of an instruction decoder.
 
-```json
-pnpx @subsquid/pipes-cli@1.0.0-alpha.4 init --config '{
+```bash
+pnpx @subsquid/pipes-cli@beta init --config '{
   "projectFolder": "solana-tokens",
   "packageManager": "pnpm",
-  "sink": "postgresql",
+  "target": "postgresql",
   "networkType": "svm",
-  "network": "solana-mainnet",
+  "defaultNetwork": "solana-mainnet",
   "templates": [
     {
       "templateId": "tokenBalances"
@@ -190,4 +203,4 @@ pnpx @subsquid/pipes-cli@1.0.0-alpha.4 init --config '{
 </Accordion>
 </AccordionGroup>
 
-The CLI ships one built-in SVM template — `tokenBalances` — plus the open-ended `custom` template shown at the top of the page.
+The CLI has one built-in SVM template, `tokenBalances`, plus the open-ended `custom` template shown at the top of the page.

@@ -17,7 +17,7 @@ const query = solanaQuery()
     block: { number: true, timestamp: true },
     instruction: { programId: true, data: true, accounts: true },
   })
-  .addInstruction({
+  .addInstructionRequest({
     range: { from: 200_000_000 },
     request: {
       programId: ['whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc'],
@@ -31,12 +31,12 @@ const query = solanaQuery()
 ```ts
 class SolanaQueryBuilder<F extends FieldSelection = {}> {
   addFields<T>(fields: Subset<T, FieldSelection>): SolanaQueryBuilder<F & T>
-  addInstruction(options: RequestOptions<InstructionRequest>): this
-  addTransaction(options: RequestOptions<TransactionRequest>): this
-  addLog(options: RequestOptions<LogRequest>): this
-  addBalance(options: RequestOptions<BalanceRequest>): this
-  addTokenBalance(options: RequestOptions<TokenBalanceRequest>): this
-  addReward(options: RequestOptions<RewardRequest>): this
+  addInstructionRequest(options: RequestOptions<InstructionRequest>): this
+  addTransactionRequest(options: RequestOptions<TransactionRequest>): this
+  addLogRequest(options: RequestOptions<LogRequest>): this
+  addBalanceRequest(options: RequestOptions<BalanceRequest>): this
+  addTokenBalanceRequest(options: RequestOptions<TokenBalanceRequest>): this
+  addRewardRequest(options: RequestOptions<RewardRequest>): this
   includeAllBlocks(range?: Range): this
   addRange(range: PortalRange): this
   merge(other?: SolanaQueryBuilder<F>): this
@@ -153,7 +153,7 @@ SPL-token balance change. Records are a tagged union: some updates carry only `p
 
 ---
 
-## `.addInstruction(options)`
+## `.addInstructionRequest(options)`
 
 Filter instructions. List filters AND across fields; values within a field OR. Matches instructions anywhere in the call tree, not just top-level.
 
@@ -173,7 +173,7 @@ Filter instructions. List filters AND across fields; values within a field OR. M
 An empty `request: {}` matches every instruction in the range.
 
 ```ts
-solanaQuery().addInstruction({
+solanaQuery().addInstructionRequest({
   range: { from: 200_000_000 },
   request: {
     programId: ['whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc'],
@@ -188,7 +188,7 @@ solanaQuery().addInstruction({
 The portal accepts account-position filters up to `a15` and a `mentionsAccount` filter that matches an account anywhere in the list. These are not exposed by the builder; use a raw query via [`portal.getStream()`](./source#symboliterator) if you need them.
 </Note>
 
-## `.addTransaction(options)`
+## `.addTransactionRequest(options)`
 
 Filter transactions.
 
@@ -198,7 +198,7 @@ Filter transactions.
 | `instructions` | `boolean` | Also fetch all instructions executed in matching transactions. |
 | `logs` | `boolean` | Also fetch all logs produced by matching transactions. |
 
-## `.addLog(options)`
+## `.addLogRequest(options)`
 
 Filter program log messages.
 
@@ -209,7 +209,7 @@ Filter program log messages.
 | `transaction` | `boolean` | Also fetch the parent transaction. |
 | `instruction` | `boolean` | Also fetch the instruction the log was emitted from. |
 
-## `.addBalance(options)`
+## `.addBalanceRequest(options)`
 
 Filter SOL balance updates.
 
@@ -219,7 +219,7 @@ Filter SOL balance updates.
 | `transaction` | `boolean` | Also fetch the parent transaction. |
 | `transactionInstructions` | `boolean` | Also fetch all instructions of parent transactions. |
 
-## `.addTokenBalance(options)`
+## `.addTokenBalanceRequest(options)`
 
 Filter SPL-token balance updates.
 
@@ -232,7 +232,7 @@ Filter SPL-token balance updates.
 | `transaction` | `boolean` | Also fetch the parent transaction. |
 | `transactionInstructions` | `boolean` | Also fetch all instructions of parent transactions. |
 
-## `.addReward(options)`
+## `.addRewardRequest(options)`
 
 Filter validator rewards.
 
@@ -263,7 +263,7 @@ Return a `QueryAwareTransformer` suitable for use as a source output.
 ```ts
 solanaPortalStream({
   portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
-  outputs: { swaps: solanaQuery().addInstruction({/*…*/}).build() },
+  outputs: { swaps: solanaQuery().addInstructionRequest({/*…*/}).build() },
 })
 ```
 

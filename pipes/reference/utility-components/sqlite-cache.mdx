@@ -3,20 +3,30 @@ title: "portalSqliteCache"
 description: "Cache Solana Portal responses with SQLite in Pipes SDK."
 ---
 
-Create SQLite cache for Portal responses. Use with `solanaPortalSource` to cache Portal API responses locally.
+Create SQLite cache for Portal responses. Use with `solanaPortalStream` to cache Portal API responses locally.
 
 ```ts
-portalSqliteCache(config: { path: string }): PortalCache
+portalSqliteCache(config: { path: string; compress?: boolean }): PortalCache
 ```
+
+**Parameters:**
+
+- `path`: Path to the SQLite database file. The parent directory is created if it does not exist.
+- `compress`: Compress cached responses with zstd. Defaults to `true`.
 
 **Example:**
 
 ```ts
 import { portalSqliteCache } from "@subsquid/pipes/portal-cache/node";
-import { solanaPortalSource } from "@subsquid/pipes/solana";
+import { solanaQuery, solanaPortalStream } from "@subsquid/pipes/solana";
 
-const source = solanaPortalSource({
+const source = solanaPortalStream({
+  id: "cached-pipe",
   portal: "https://portal.sqd.dev/datasets/solana-mainnet",
+  outputs: solanaQuery()
+    .addFields({ block: { number: true, timestamp: true } })
+    .includeAllBlocks()
+    .build(),
   cache: portalSqliteCache({
     path: "./portal-cache.sqlite",
   }),

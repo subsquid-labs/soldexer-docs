@@ -15,12 +15,12 @@ If your logic is hard to express in SQL, or if the derived state must be pre-com
 
 | Approach | State lives in | Persistence across restarts | Fork handling | Extra infra | Best for |
 |---|---|---|---|---|---|
-| [A. Pure in-RAM](#a-pure-in-ram) | JS heap | rebuilt from portal on startup | `fork()` callback | none | sliding windows, candles, rolling aggregates |
+| [A. Pure in-RAM](#a-pure-in-ram) | JS heap | rebuilt from portal on startup | `rollback()` callback | none | sliding windows, candles, rolling aggregates |
 | [B. ClickHouse MVs](#b-clickhouse-materialized-views) | ClickHouse | ✓ | `sign = -1` rows | ClickHouse | SQL-expressible analytics |
-| [C. SQLite transformer](#c-sqlite-transformer) | Local file | ✓ (delta table) | `fork()` callback | none | moderate state |
+| [C. SQLite transformer](#c-sqlite-transformer) | Local file | ✓ (delta table) | `rollback()` callback | none | moderate state |
 | [D. Postgres/Drizzle target](#d-postgresdrizzle-target) | Postgres | ✓ | ✓ automatic | Postgres | atomic state + output, Postgres target |
 | [E. Apache Flink](#e-apache-flink) | Flink cluster | ✓ | via compensating events | Kafka + Flink | TB-scale distributed state |
-| [F. External KV store](#f-external-kv-store) | Redis / Valkey | ✓ (with AOF/RDB) | `fork()` callback | Redis | µs-latency lookups, multi-process state |
+| [F. External KV store](#f-external-kv-store) | Redis / Valkey | ✓ (with AOF/RDB) | `rollback()` callback | Redis | µs-latency lookups, multi-process state |
 
 ---
 
@@ -68,10 +68,10 @@ start: async ({ portal, state, logger }) => {
 
 ### Fork handling
 
-`target.fork()` fires first (ClickHouse `onRollback` or drizzle snapshot rollback), then the transformer's `fork()` callback. At that point the database already reflects pre-fork state. In `fork()`, drop in-RAM entries for blocks beyond the rollback cursor:
+`target.resolveFork()` fires first (ClickHouse `onRollback` or drizzle snapshot rollback), then the transformer's `rollback()` callback. At that point the database already reflects pre-fork state. In `rollback()`, drop in-RAM entries for blocks beyond the rollback cursor:
 
 ```typescript
-fork: async (cursor, { logger }) => {
+rollback: async (cursor, { logger }) => {
   recentEntries = recentEntries.filter(e => e.blockNumber <= cursor.number)
 }
 ```
@@ -324,13 +324,13 @@ See [`11.stateful-transforms-postgres-stateless.example.ts`](https://github.com/
 
 ### Sub-approach 2 — In-memory + Postgres mirror
 
-`start()` loads the full state into in-RAM Maps. `transform()` reads/writes the Maps with no DB round trips per batch. `fork()` reloads the Maps from Postgres after drizzleTarget commits the snapshot rollback.
+`start()` loads the full state into in-RAM Maps. `transform()` reads/writes the Maps with no DB round trips per batch. `rollback()` reloads the Maps from Postgres after drizzleTarget commits the snapshot rollback.
 
 - ✓ No per-batch DB reads — all reads from memory after startup
 - ✓ Fast for large batches with many distinct keys
 - ✗ Full state must fit in RAM
 - ✗ Startup time is O(state size)
-- ✗ `fork()` callbacks required to resync Maps after rollback
+- ✗ `rollback()` callbacks required to resync Maps after rollback
 
 <Expandable title="Complete example — in-memory (example 12)">
 
@@ -351,7 +351,7 @@ For both sub-approaches, all state tables must be listed in `drizzleTarget`'s `t
 **When to use:**
 - State is too large for a single machine (terabytes).
 - Your problem requires stateful joins across multiple independent streams (e.g., correlate DEX trades with lending liquidations across different chains).
-- You need exactly-once semantics across multiple heterogeneous sinks.
+- You need exactly-once semantics across multiple heterogeneous targets.
 
 **When not to use:**
 - Single-node deployments — the operational overhead (JVM runtime, cluster management, ZooKeeper or KRaft, checkpoint storage) is only justified when the problem genuinely requires distributed state.
@@ -372,17 +372,17 @@ Use Redis, Valkey, or a similar key-value store as a fast external state backend
 - A single-process indexer is sufficient — adding Redis increases operational complexity for no benefit.
 - You need transactional state + output commits (use approach D instead).
 
-**Fork handling:** The transformer's `fork()` callback must delete or undo the Redis keys written for rolled-back blocks. Keep a per-block write log (similar to the SQLite delta table) to know which keys to revert.
+**Fork handling:** The transformer's `rollback()` callback must delete or undo the Redis keys written for rolled-back blocks. Keep a per-block write log (similar to the SQLite delta table) to know which keys to revert.
 
 **Crash safety:** Redis is not durable by default. Enable AOF or RDB persistence, or treat Redis purely as a warm cache and accept that a Redis restart requires a replay from the pipeline cursor.
 
 ---
 
-## Fork callbacks and crash recovery
+## Rollback callbacks and crash recovery
 
 The fork handling responsibilities differ by approach:
 
-| Approach | `fork()` needed in transformer | How DB state is rolled back |
+| Approach | `rollback()` needed in transformer | How DB state is rolled back |
 |---|---|---|
 | A. In-RAM | ✓ — prune entries > cursor | n/a (state is RAM-only) |
 | B. ClickHouse MVs | ✗ — handled in `onRollback` | `sign = -1` rows via `onRollback` |
@@ -391,7 +391,7 @@ The fork handling responsibilities differ by approach:
 | E. Flink | ✗ — compensating events | Flink checkpoint rollback |
 | F. External KV | ✓ — revert write log | manual key deletion |
 
-**Ordering guarantee:** `target.fork()` always fires before transformer `fork()` callbacks. By the time your transformer's `fork()` runs, the target (ClickHouse `onRollback`, drizzleTarget snapshot rollback) has already committed the database rollback. It is safe to read the database in `fork()`.
+**Ordering guarantee:** `target.resolveFork()` always fires before transformer `rollback()` callbacks. By the time your transformer's `rollback()` runs, the target (ClickHouse `onRollback`, drizzleTarget snapshot rollback) has already committed the database rollback. It is safe to read the database in `rollback()`.
 
 **Crash recovery** (approaches A, B, C only): a crash between the transformer's store write and the target's cursor save leaves state ahead of the pipeline cursor. Handle this in `start()` by comparing your local high-water mark to `state.current`:
 

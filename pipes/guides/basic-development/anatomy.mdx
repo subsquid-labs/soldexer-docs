@@ -6,13 +6,13 @@ description: "Understand the components of a Solana Pipes SDK data pipeline."
 
 <Frame>
   <img
-    src="./anatomy-basic.svg"
+    src="./anatomy-pipe.svg"
     alt="Pipe anatomy"
   ></img>
 </Frame>
 
 A Solana pipe made with SQD's Pipes SDK consists of:
- - A **source** - typically made with `solanaPortalSource()`. Can have one or more outputs.
+ - A **source** - typically made with `solanaPortalStream()`. Can have one or more outputs.
  - **Queries** - tell the source which data has to be retrieved to compute each output. A query is defined by a chain call terminated by `.build()`. Here's an example:
 
 
@@ -22,8 +22,9 @@ A Solana pipe made with SQD's Pipes SDK consists of:
        block: { timestamp: true },
        instruction: { programId: true, transactionIndex: true },
      })
-     .addInstruction({
-       programId: [ ORCA_WHIRLPOOL_PROGRAM_ID ]
+     .addInstructionRequest({
+       range: { from: 300_000_000 },
+       request: { programId: [ ORCA_WHIRLPOOL_PROGRAM_ID ] },
      })
      .build()
    ```
@@ -39,7 +40,7 @@ A Solana pipe made with SQD's Pipes SDK consists of:
    ```
    Source object streams the data you get out of each chain of transforms as the value of the corresponding output field.
  - Making utils that return reusable **query-transform combos** is a very useful pattern. In particular, on Solana it is often convenient to keep retrieval and decoding of program instructions in a single module. You can easily make such combos with the `solanaInstructionDecoder()` function - see the [Handling instructions](./handling-instructions) guide.
- - **Whole pipe transformers** (optional) - use this if you need to compute something based on data originating from multiple queries, or if you need access to per-batch context (cursor, logger, profiler, fork callbacks). Use `createTransformer()` so the SDK can thread cursor and rollback information ([1](../architecture-deep-dives/cursor-management), [2](../architecture-deep-dives/fork-handling)) through your transform:
+ - **Whole pipe transformers** (optional) - use this if you need to compute something based on data originating from multiple queries, or if you need access to per-batch context (cursor, logger, profiler, rollback callbacks). Use `createTransformer()` so the SDK can thread cursor and rollback information ([1](../architecture-deep-dives/cursor-management), [2](../architecture-deep-dives/fork-handling)) through your transform:
    ```ts
    import { createTransformer } from '@subsquid/pipes'
 
@@ -63,8 +64,10 @@ A Solana pipe made with SQD's Pipes SDK consists of:
 
  - Pipe termination: a plain async iterator or a **target**.
     * If you use the pipe as an async iterator it will throw exceptions if the underlying chain is experiencing reorgs, see [Fork handling](../architecture-deep-dives/fork-handling).
-    * We offer two targets out of the box:
-       - Postgres via Drizzle
-       - ClickHouse
+    * We offer four targets out of the box:
+       - [Postgres via Drizzle](../../reference/basic-components/target/postgres-drizzle)
+       - [ClickHouse](../../reference/basic-components/target/clickhouse)
+       - [BigQuery](../../reference/basic-components/target/bigquery)
+       - [Parquet files](../../reference/basic-components/target/parquet)
 
       You can make your own using [`createTarget()`](../../reference/basic-components/target/create-target).

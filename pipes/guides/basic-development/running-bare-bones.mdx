@@ -3,12 +3,13 @@ title: "Running bare bones"
 description: "Run a Solana Pipes SDK pipeline as a plain async iterator."
 ---
 
-By default, `solanaPortalSource` activates a console logger. Passing `metrics` and `progress` enables those services. To embed a pipe into external code with no side effects, disable them all:
+By default, `solanaPortalStream` activates a console logger. Passing `metrics` and `progress` enables those services. To embed a pipe into external code with no side effects, disable them all:
 
 ```ts
 import { solanaQuery, solanaPortalStream } from '@subsquid/pipes/solana'
 
 const stream = solanaPortalStream({
+  id: 'bare-bones',
   portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
   outputs: solanaQuery()
     .addFields({ block: { number: true, timestamp: true } })
