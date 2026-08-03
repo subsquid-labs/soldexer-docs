@@ -58,6 +58,16 @@ Per pipe (keyed by the `id` passed to the source):
 - the serialised portal query (helpful for reviewing what your decoder actually asked for)
 - memory usage of the pipe process and SDK version
 
+In the latest release of Pipes UI, `@subsquid/pipes-ui@1.0.0-alpha.8`, we can now track multiple indexers in a single dashboard:
+
+<Frame>
+  <img
+    src="/images/sdk/pipes/pipes-ui-multi-indexer-dashboard.png"
+    alt="Pipes UI dashboard tracking many indexers at once, each card showing progress, ETA, indexing rate, download speed and process memory"
+    className="rounded-xl"
+  />
+</Frame>
+
 When [profiling is on](../advanced-topics/profiling) (the default in non-production environments), the UI also renders the per-batch span tree — useful for seeing which stage (`fetch data`, `apply transformers`, a named decoder, your own `ctx.profiler.start('…')` spans) is dominating batch time. Decorate spans you want to track with `profiler: { name: '…' }` on transformers and decoders.
 
 Any [custom metrics](../advanced-topics/metrics) you register via `ctx.metrics.counter()`, `.gauge()`, `.histogram()`, or `.summary()` show up on the pipe's `/metrics` endpoint (as Prometheus text). The dashboard does not render arbitrary custom series — if you need charts for your own metrics, scrape `/metrics` with Prometheus and graph with Grafana.
