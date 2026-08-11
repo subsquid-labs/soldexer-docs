@@ -430,7 +430,7 @@ The scan advances the pointer for the lower-numbered entry until both point to t
 </Accordion>
 <Accordion title="7. Fork detection scope (real-time streams only)">
 
-**Forks only occur in the real-time (unfinalized) portion of the stream.** The `/finalized-stream` endpoint never returns a 409. Fork handling is only needed when consuming the `/stream` endpoint with `fromBlock` near or at the chain head. If your range is bounded and entirely in the past, you will never see a fork.
+**Forks only occur in the real-time (unfinalized) portion of the stream.** Finalized data does not reorganize: a 409 from the `/finalized-stream` endpoint only means the cursor's `parentBlockHash` is stale, for example carried over from an orphaned unfinalized block. Fork handling is only needed when consuming the `/stream` endpoint with `fromBlock` near or at the chain head. If your range is bounded and entirely in the past, you will never see a fork.
 
 **`parentBlockHash` is the tripwire.** Every request to the portal includes the hash of the last slot the client has seen. A mismatch triggers a 409. Anything that disrupts this — starting from a cursor with a wrong or missing hash, replaying from a checkpoint that has drifted from the chain — will produce spurious fork events.
 
