@@ -25,17 +25,20 @@ async function main() {
     }).pipe({
       profiler: { name: 'expose metrics' },
       transform: (data, { metrics }) => {
-        if (!data) return // Skip if no latency data
+        const gauge = metrics.gauge({
+          name: 'rpc_latency_ms',
+          help: 'Portal delay against an RPC endpoint, in ms (negative: the Portal delivered first)',
+          labelNames: ['url'],
+        })
 
-        // For each RPC endpoint, update the latency gauge metric
-        for (const rpc of data.rpc) {
-          metrics
-            .gauge({
-              name: 'rpc_latency_ms',
-              help: 'RPC Latency in ms',
-              labelNames: ['url'],
-            })
-            .set({ url: rpc.url }, rpc.portalDelayMs)
+        // Each batch carries the samples that became decidable in it
+        for (const sample of data) {
+          for (const rpc of sample.rpc) {
+            // The endpoint never reported this slot, so there is no delay to record
+            if (rpc.portalDelayMs === undefined) continue
+
+            gauge.set({ url: rpc.url }, rpc.portalDelayMs)
+          }
         }
 
         return data
@@ -47,10 +50,10 @@ async function main() {
 
   // Iterate over the stream, logging block and RPC latency data
   for await (const { data } of stream) {
-    if (!data) continue // Skip if no block data
-
-    console.log(`Slot: ${formatBlock(data.number)} / ${data.timestamp.toString()}`)
-    console.table(data.rpc)
+    for (const sample of data) {
+      console.log(`Slot: ${formatBlock(sample.number)} / ${sample.timestamp.toString()}`)
+      console.table(sample.rpc)
+    }
   }
 }
 
@@ -60,15 +63,23 @@ void main()
 
 ## Output format
 
-Data freshness data includes:
+Each batch carries an array of samples: the ones that became decidable in that batch. A sample is decidable once both the Portal and the RPC endpoints have reported it, or once the wait window set by `resolveTimeoutMs` closes. It defaults to 60 seconds.
+
+Each sample includes:
  - `number` / `timestamp`: the observed slot and its timestamp
  - `portal.receivedAt`: when the block arrived from the Portal
  - `rpc`: one entry per configured RPC endpoint:
    - `url`: RPC endpoint URL
    - `receivedAt`: when the RPC endpoint received the block
    - `hash`: block hash as seen by the RPC (not set on Solana)
-   - `portalDelayMs`: milliseconds between RPC arrival and Portal availability
+   - `portalDelayMs`: signed milliseconds between RPC arrival and Portal availability. A negative value means the Portal delivered the block first
+   - `unresolved`: set when the endpoint did not report the block, in which case `receivedAt` and `portalDelayMs` are absent
 
+An endpoint that did not report the block is `rpc-behind` when it had not reached the block before the window closed, and `rpc-missing` when it is already past the block but never reported it. Count these entries rather than charting them. A missing delay is not zero.
+
+<Warning>
+`portalDelayMs` can be negative. If you feed these values into a histogram, revisit the buckets and any `max(0, ...)` clamping, or every Portal lead folds back into the zero bucket.
+</Warning>
 
 ```
 Slot: 369,377,455 / Fri Sep 26 2025 15:31:36 GMT+0400

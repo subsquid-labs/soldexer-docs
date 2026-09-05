@@ -16,6 +16,7 @@ import { solanaRpcLatencyWatcher } from '@subsquid/pipes/solana'
 ```ts
 function solanaRpcLatencyWatcher(options: {
   rpcUrl: string[]
+  resolveTimeoutMs?: number
 }): Transformer
 ```
 
@@ -24,6 +25,7 @@ function solanaRpcLatencyWatcher(options: {
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `rpcUrl` | `string[]` | Array of RPC endpoint URLs to monitor |
+| `resolveTimeoutMs` | `number` | How long to wait for an endpoint to report a slot before recording it as `rpc-behind`. Defaults to `60_000` |
 
 ## Return Value
 
@@ -31,10 +33,10 @@ Returns a query-transformer combo that already includes the block query it needs
 
 ## Output Data Structure
 
-Each output contains:
+Each batch carries the samples that became decidable in it, so iterate the result:
 
 ```ts
-{
+type LatencySample = {
   number: number,           // Slot number
   timestamp: Date,          // Block timestamp
   portal: {
@@ -44,10 +46,24 @@ Each output contains:
     url: string,            // RPC endpoint URL
     hash?: string,          // Not set on Solana: slot update notifications carry no hash
     receivedAt?: Date,      // When the block was received from this RPC
-    portalDelayMs: number,  // Delay between RPC arrival and Portal availability (ms)
+    portalDelayMs?: number, // Signed delay; negative means the Portal delivered first
+    unresolved?: 'rpc-behind' | 'rpc-missing',
   }>
 }
 ```
+
+A sample is emitted once both the Portal and the RPC endpoints have reported the slot, or once the wait window closes. `rpc` carries one entry per configured endpoint on every sample.
+
+`portalDelayMs` is signed. A negative value means the Portal delivered the slot before that endpoint did. If these values feed a histogram, revisit the buckets and any `max(0, ...)` clamping, or Portal leads fold back into the zero bucket.
+
+`portalDelayMs` and `receivedAt` are absent whenever `unresolved` is set:
+
+| `unresolved` | Meaning |
+|---|---|
+| `rpc-behind` | The endpoint had not reached the slot before the wait window closed, so the Portal is ahead by at least that window. |
+| `rpc-missing` | The endpoint is already past the slot but never reported it, after a reorg, a dropped update, or a slot seen while the stream was backfilling. |
+
+Count unresolved entries rather than charting them. A missing delay is not zero.
 
 ## Basic Usage
 
@@ -63,10 +79,10 @@ const stream = solanaPortalStream({
 })
 
 for await (const { data } of stream) {
-  if (!data) continue
-
-  console.log(`Slot: ${data.number}`)
-  console.table(data.rpc)
+  for (const sample of data) {
+    console.log(`Slot: ${sample.number}`)
+    console.table(sample.rpc)
+  }
 }
 ```
 
@@ -101,7 +117,7 @@ const stream = solanaPortalStream({
 
 ## Metrics Integration
 
-Export latency data to Prometheus via the built-in metrics registry. See the [Data freshness monitoring guide](../../guides/advanced-topics/latency-monitoring) for the full example:
+Export latency data to Prometheus via the built-in metrics registry. Skip the entries that carry `unresolved`, since they have no delay to record. See the [Data freshness monitoring guide](../../guides/advanced-topics/latency-monitoring) for the full example:
 
 ```ts
 import { solanaPortalStream, solanaRpcLatencyWatcher } from '@subsquid/pipes/solana'
@@ -115,16 +131,18 @@ const stream = solanaPortalStream({
   }).pipe({
     profiler: { name: 'expose metrics' },
     transform: (data, { metrics }) => {
-      if (!data) return
+      const gauge = metrics.gauge({
+        name: 'rpc_latency_ms',
+        help: 'Portal delay against an RPC endpoint, in ms (negative: the Portal delivered first)',
+        labelNames: ['url'],
+      })
 
-      for (const rpc of data.rpc) {
-        metrics
-          .gauge({
-            name: 'rpc_latency_ms',
-            help: 'RPC Latency in ms',
-            labelNames: ['url'],
-          })
-          .set({ url: rpc.url }, rpc.portalDelayMs)
+      for (const sample of data) {
+        for (const rpc of sample.rpc) {
+          if (rpc.portalDelayMs === undefined) continue
+
+          gauge.set({ url: rpc.url }, rpc.portalDelayMs)
+        }
       }
 
       return data
@@ -140,8 +158,8 @@ The RPC latency watcher:
 
 1. Subscribes to slot updates via WebSocket (`slotsUpdatesSubscribe`)
 2. Listens for `optimisticConfirmation` events from each RPC
-3. Compares the arrival time of blocks between RPC and Portal
-4. Reports the delay as `portalDelayMs`
+3. Holds each slot until both sides have reported it, or until `resolveTimeoutMs` passes
+4. Reports the signed delay as `portalDelayMs`, or `unresolved` when an endpoint never reported the slot
 
 <Warning>
 The measured values include client-side network latency. For RPC, only the arrival time of the block is measured. This does not capture the node's internal processing latency.
