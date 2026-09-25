@@ -1,0 +1,168 @@
+---
+title: "pubsubTarget"
+description: "Google Cloud Pub/Sub target for Pipes SDK"
+---
+
+Publish pipe output to Google Cloud Pub/Sub as a BigQuery CDC-compatible change stream, with fork-aware compensation. Each row becomes a message carrying `_id`, `_CHANGE_TYPE`, and a `_CHANGE_SEQUENCE_NUMBER` from one gap-free, producer-wide counter, so a subscriber holding a contiguous run of sequence numbers is missing no operation the producer committed inside it. Nothing but row changes goes on the topic, so a direct BigQuery subscription needs no message filter.
+
+```ts
+import { pubsubTarget, windowTopic, SqlitePubsubState, PubsubTargetError } from '@subsquid/pipes/targets/pubsub'
+```
+
+`@google-cloud/pubsub` is an optional peer dependency. The default SQLite-backed state additionally needs `better-sqlite3`:
+
+```bash
+npm install @google-cloud/pubsub better-sqlite3
+```
+
+## `pubsubTarget`
+
+```ts
+pubsubTarget<T>({
+  pubsub: PubSub | ClientConfig,
+  state: { path: string } | PubsubState,
+  topics?: { [stream in keyof T]?: TopicRoute<T[stream]> },
+  attributes?: Record<string, string>,
+  sequenceBarrier?: boolean,
+  allowColdStart?: boolean,
+  settings?: { id?: string },
+  publish?: {
+    messageOrdering?: boolean,
+    uidAttribute?: boolean,
+    batching?: BatchPublishOptions,
+    flowControl?: FlowControlOptions,
+  },
+  assumeNoForks?: boolean,
+  publishFrom?: number | 'latest',
+  namespace?: string,
+  topicSetup?: 'validate' | 'create' | 'none',
+})
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `pubsub` | Yes | A constructed `PubSub` client, or a `ClientConfig` passed to `new PubSub(...)`. Authentication is ADC, or the Pub/Sub emulator when `PUBSUB_EMULATOR_HOST` is set. |
+| `state` | Yes | `{ path }` opens the built-in `SqlitePubsubState` at that file; pass a `PubsubState` implementation directly for a different store. Holds the cursor, rollback manifest, outbox, and sequence counter. |
+| `topics` | No | One `TopicRoute` per pipe output stream, keyed by the stream's name in `outputs`. |
+| `attributes` | No | Attributes constant for this producer (for example `chain`, `table`). They ride every message; a route's per-draft `attributes` add to these. |
+| `sequenceBarrier` | No | Default `true`. Keeps the change sequence gap-free, which in practice also limits the producer to one route: operations are sequenced in map order, and a second route feeding the same topic is refused (`E2429`) on any batch spanning more than one block. Set `false` only when no consumer relies on the sequence being contiguous; this is what allows several routes or several topics from one producer. |
+| `allowColdStart` | No | Default `false`. A run that finds empty state is refused, because restarting the sequence under a namespace that already published makes every affected row freeze downstream with no symptom. Set `true` only to bootstrap a namespace that has never published. |
+| `settings.id` | No | Cursor key inside the state file. Defaults to the pipe's own `id`. |
+| `publish.messageOrdering` | No | Default `false`. Enables Pub/Sub ordered publishing; each topic's name is the default ordering key, overridable per draft via `MessageDraft.orderingKey`. The subscription must also have message ordering enabled. |
+| `publish.uidAttribute` | No | Default `false`. Adds a stable `_uid` attribute to every message, for pipelines that need a publisher-supplied unique id (for example Dataflow's `idAttribute`). Costs one attribute per message. |
+| `publish.batching` / `publish.flowControl` | No | Passed straight through to the underlying `@google-cloud/pubsub` publisher. |
+| `assumeNoForks` | No | Default `false`. Without it, a dataset that never reports a finalized head is refused at start (`E2407`): no watermark means no rollback manifest, and this medium cannot retract what it already published. A fork reported anyway is still fatal (`E2408`). |
+| `publishFrom` | No | Default `'latest'`, resolved to the current head on first start and persisted so restarts keep the same go-live block. The pipe may read from earlier for warm-up, but nothing below this block is published. |
+| `namespace` | No | Producer namespace baked into every generated id. Defaults to the pipe id. Pin it explicitly to decouple feed identity from pipe naming, since with the default a pipe rename is a breaking change for consumers. |
+| `topicSetup` | No | `'validate'` (default) fails fast at start if a topic is missing. `'create'` creates missing topics (dev convenience; needs admin IAM). `'none'` skips topic administration entirely. |
+
+**`TopicRoute<Data>`:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `topic` | Yes | Destination topic name. |
+| `mode` | No | `'event'` (default): every id is write-once, and a fork orphans it outright. `'materialized'`: ids may be revised, and a fork restores the surviving revision. Every draft in one materialized route must derive its id the same way. |
+| `map` | Yes | `(batch: { data, ctx }) => MessageDraft[]`. Must be pure and deterministic: replays must reproduce identical bytes so duplicates stay recognizable. |
+| `encode` | No | Encoder for the complete CDC row. Defaults to canonical JSON; must stay unchanged while the route has pending operations in the state. |
+| `deriveId` | No | `(draft, { namespace, stream, index }) => string`. Identity source for drafts that leave both `data._id` and `MessageDraft.id` unset, required for rows that outlive the block that last touched them, such as `windowTopic` rows. |
+| `rollbackWhenMissing` | No | `(draft) => { op: 'delete' } \| { op: 'upsert'; data }`. The compensation for an id whose every published revision a fork orphans. Default is `{ op: 'delete' }`; returning an `upsert` is what keeps a topic delete-free through forks. Evaluated eagerly at the id's first rollbackable publish, since at fork time the draft that produced it is long gone. |
+
+**`MessageDraft`:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `data` | Yes | The row: a plain object. Set `data._id` to own the row identity; otherwise the target derives one. The canonical codec accepts values such as `bigint` and byte arrays. |
+| `block` | Yes | `{ number, hash?, timestamp? }`, the block this operation belongs to. Drives fork compensation; a fork-capable dataset needs `hash` or a route that supplies its own id (`E2409`). |
+| `op` | No | `'upsert'` (default) writes the row; `'delete'` removes it. Emit `'delete'` only where the row genuinely disappears; fork compensation produces its own. |
+| `id` | No | Fallback stable identity when `data._id` is nullish. Default: `` `${namespace}:${stream}:${block.number}:${block.hash}:<seq-in-block>` ``. |
+| `attributes` | No | User attributes for subscription filtering, copied onto any compensating operation. Names starting with `_` are reserved by the target, `goog…` by GCP. |
+| `orderingKey` | No | Only with `publish.messageOrdering` enabled. Overrides the topic's default ordering key. |
+
+## Fork handling
+
+On a reorg, the target folds every orphaned id in the rollback manifest back to the state that survives at the safe cursor, enqueues the resulting compensations (a `delete`, or the route's `rollbackWhenMissing` result), and rewinds before the source re-streams the canonical blocks. The finalized head a consumer needs for its own confirmation policy rides the `_finalized` attribute on every message; it bounds retraction, not arrival, since a pipe still catching up publishes well below it. See [Fork handling](../../../guides/architecture-deep-dives/fork-handling) for how the finalization watermark is resolved and enforced across targets.
+
+## `windowTopic`
+
+```ts
+windowTopic<Out>({
+  topic: string,
+  attributes?: (row: WindowRow<Out>) => Record<string, string>,
+  encode?: CdcEncoder,
+  emptyWindows?: 'delete' | 'upsert',
+  emptyValues?: (window: WindowBounds) => Out,
+  orderingKey?: (row: WindowRow<Out>) => string,
+}): TopicRoute<WindowRow<Out>[]>
+```
+
+Builds a `TopicRoute` for an aggregator window stream: every re-emission of a window is an `upsert` on the same id (`mode: 'materialized'`), so BigQuery CDC replaces the previous revision instead of appending a new row.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `topic` | Yes | Destination topic name. |
+| `attributes` | No | Filter attributes for the window's rows. `timeframe` is added automatically unless this callback returns its own. Must be stable across revisions. |
+| `encode` | No | Encoder for the complete CDC row. Defaults to canonical JSON. |
+| `emptyWindows` | No | `'delete'` (default) removes the row when a window empties out; `'upsert'` keeps the topic delete-free by publishing a neutral value instead. |
+| `emptyValues` | No | Required with `emptyWindows: 'upsert'`. Also supplies the route's fork inverse, since only the route knows what an empty window looks like. |
+| `orderingKey` | No | With message ordering enabled, shards the topic per series. A window id must never move keys. |
+
+## `SqlitePubsubState`
+
+```ts
+new SqlitePubsubState({ path: string, id?: string })
+```
+
+The state store `pubsubTarget` constructs when `state` is given as `{ path }`. `id` overrides the cursor key that would otherwise bind to the pipe's own `id` once the target opens the store. To use a different backend, implement the `PubsubState` interface (`open`, `getCursor`, `getMeta`, `setMeta`, `commit`, `pending`, `confirm`, `fork`, `stats`, `close`) and pass the instance as `state` directly.
+
+## Example
+
+```ts expandable
+import { PubSub } from '@google-cloud/pubsub'
+import { solanaInstructionDecoder, solanaPortalStream } from '@subsquid/pipes/solana'
+import { pubsubTarget } from '@subsquid/pipes/targets/pubsub'
+import * as orcaWhirlpool from './abi/orca_whirlpool/index.js'
+
+await solanaPortalStream({
+  id: 'orca-whirlpool-swaps',
+  portal: 'https://portal.sqd.dev/datasets/solana-mainnet',
+  outputs: solanaInstructionDecoder({
+    range: { from: 'latest' },
+    programId: [orcaWhirlpool.programId],
+    instructions: { swap: orcaWhirlpool.instructions.swap },
+  }),
+}).pipeTo(
+  pubsubTarget({
+    pubsub: new PubSub({ projectId: 'my-gcp-project' }),
+    state: { path: './state/orca-whirlpool-swaps.sqlite' },
+    namespace: 'orca-whirlpool-swaps',
+    allowColdStart: true, // drop once the namespace has published
+    attributes: { program: 'orca-whirlpool' },
+    topics: {
+      swap: {
+        topic: 'solana.orca-whirlpool.swaps',
+        map: ({ data }) =>
+          data.map((d) => ({
+            data: {
+              _id: `${d.block.hash}:${d.transaction.transactionIndex}.${d.rawInstruction.instructionAddress.join('.')}`,
+              amount: d.instruction.data.amount,
+              sqrtPriceLimit: d.instruction.data.sqrtPriceLimit,
+              block: d.block.number,
+              timestamp: d.timestamp,
+            },
+            block: d.block,
+            attributes: { programId: d.programId },
+          })),
+      },
+    },
+  }),
+)
+```
+
+
+Full runnable example, including `windowTopic` and a direct BigQuery subscription: [`18.pubsub.example.ts`](https://github.com/subsquid-labs/pipes-sdk/blob/main/docs/examples/evm/18.pubsub.example.ts).
+
+## Notes
+
+- The canonical codec encodes a `bigint` as a decimal string and a `Date` as RFC 3339; a value it cannot represent throws `PubsubTargetError` (`E2405`), and a cycle throws `E2406`.
+- Every error the target, `windowTopic`, or the SQLite state can raise is a `PubsubTargetError` with a stable `E24xx` code. See the [error reference](/en/sdk/pipes-sdk/reference/errors#google-pubsub-target) for the full list and fixes.
+- The state file is the producer's sequencer: keep it on durable storage and run one producer per path. Losing it and restarting under the same namespace is a `COLD_START_REFUSED` (`E2420`), not something to retry past. Recovery is a fresh namespace and a consumer re-bootstrap.

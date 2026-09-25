@@ -23,7 +23,7 @@ If you'd rather feed docs into a model directly, the static [`llms.txt`](https:/
 # Scaffolding with Pipes CLI
 
 <Note>
-The 1.0 line ships under the npm `beta` tag, so the commands below pin `@beta`. It covers all three packages — `@subsquid/pipes`, `@subsquid/pipes-cli`, and `@subsquid/pipes-ui` — and generated projects depend on the same line. Without the pin, npm serves an older 1.0 alpha that does not accept the config shown here.
+Pipes CLI and Pipes UI publish the 1.0 line under the npm `beta` tag, so the commands below pin `@beta` for those two packages. Without the pin, npm serves an older 1.0 alpha that does not accept the config shown here. `@subsquid/pipes` itself installs the 1.0 line by default, no tag needed.
 </Note>
 
 In a few minutes, you'll have a running pipe that indexes Orca Whirlpool swap instructions on Solana mainnet into a local PostgreSQL database.
@@ -154,6 +154,10 @@ const custom = solanaInstructionDecoder({
 ```
 
 The decoder asks the Portal for `swap` instructions on the Orca Whirlpool program. `enrichEvents` (from `src/utils/`) reshapes each decoded instruction into a row matching the Drizzle table. See the [Pipe anatomy](./guides/basic-development/anatomy) and [Handling instructions](./guides/basic-development/handling-instructions) guides for more info on `solanaInstructionDecoder()`.
+
+<Warning>
+The generated `src/utils/index.ts` does not compile as-is: it reads `v.blockNumber`, a property `DecodedInstruction` no longer has. Change that line to `blockNumber: v.block.number` until the CLI template is fixed.
+</Warning>
 
 The `main()` function wires the decoder to a [drizzleTarget](./reference/basic-components/target/postgres-drizzle):
 
